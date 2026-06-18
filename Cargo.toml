@@ -44,6 +44,7 @@ clap = { version = "4", features = ["derive"] }
 async-trait = "0.1"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "time"] }
 regex = "1"
+encoding_rs = "0.8"
 
 # 生态依赖（子模块 path 引用）
 ogsql-parser = { git = "https://github.com/c2j/ogsql-parser" }
