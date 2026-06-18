@@ -1,0 +1,43 @@
+name: Dogfood
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  self-audit:
+    name: CodeRoughcollie Self-Audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: true
+
+      # TODO: v0.1.0 发布后替换为下载预编译二进制
+      - name: Build coderc from source
+        run: |
+          cargo build --release -p cr-cli
+          sudo cp target/release/coderc /usr/local/bin/
+
+      - name: Run self-audit
+        run: |
+          coderc audit \
+            --baseline origin/${{ github.base_ref }} \
+            --files $(git diff --name-only origin/${{ github.base_ref }} | tr '\n' ',') \
+            --output-format markdown \
+            --output-path audit-report.md
+
+      - name: Comment PR
+        if: always()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const report = fs.readFileSync('audit-report.md', 'utf8');
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: report
+            });

@@ -1,0 +1,24 @@
+[submodule "lib/ogsql-parser"]
+	path = lib/ogsql-parser
+	url = https://github.com/c2j/ogsql-parser.git
+[submodule "lib/ogexplain-analyzer"]
+	path = lib/ogexplain-analyzer
+	url = https://github.com/c2j/ogexplain-analyzer.git
+[submodule "lib/metamorphosis"]
+	path = lib/metamorphosis
+	url = https://github.com/c2j/metamorphosis.git
+[submodule "lib/rust-opengauss"]
+	path = lib/rust-opengauss
+	url = https://github.com/c2j/rust-opengauss.git
+[submodule "lib/codeweb"]
+	path = lib/codeweb
+	url = https://github.com/c2j/codeweb.git
+[submodule "lib/flux-gauss"]
+	path = lib/flux-gauss
+	url = https://github.com/c2j/flux-gauss.git
+[submodule "lib/WDRProbe"]
+	path = lib/WDRProbe
+	url = https://github.com/c2j/WDRProbe.git
+[submodule "lib/astgrep"]
+	path = lib/astgrep
+	url = https://github.com/c2j/astgrep.git

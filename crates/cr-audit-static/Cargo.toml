@@ -1,0 +1,17 @@
+[package]
+name = "cr-audit-static"
+description = "静态审核：SQL 反模式 AST 匹配 + Java/MyBatis 安全扫描"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+version.workspace = true
+
+[dependencies]
+cr-core = { workspace = true }
+ogsql-parser = { workspace = true }
+metamorphosis-core = { workspace = true }
+metamorphosis-rules = { workspace = true }
+regex = { workspace = true }
+
+[lints]
+workspace = true

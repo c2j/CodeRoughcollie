@@ -1,0 +1,49 @@
+# CodeRoughcollie 示例配置
+# 复制为 .roughcollie.toml 并根据实际情况修改
+
+[project]
+name = "my-gauss-app"
+root = "."
+
+# === 数据库预置连接（可选，启用后支持真实 EXPLAIN）===
+[database]
+enabled = false
+host = "10.0.1.100"
+port = 5432
+database = "roughcollie_audit"
+username = "roughcollie"
+password_env = "GAUSSDB_PASSWORD"
+ssl_mode = "verify-full"
+auth_method = "sha256"
+
+[database.explain]
+timeout_seconds = 30
+max_cost_warning = 10000
+max_cost_critical = 50000
+buffers_threshold = 100000
+enable_analyze = true
+enable_buffers = true
+
+[database.security]
+enforce_readonly = true
+allowed_commands = ["EXPLAIN", "SET", "SHOW"]
+
+# === 审核规则 ===
+[rules.ogexplain]
+preset = "all"
+
+[rules.astgrep]
+preset = ["gaussdb-security", "java-sql-injection"]
+severity_threshold = "warning"
+
+[rules.complexity]
+enabled = true
+baseline_compare = true
+warning_delta = 10
+critical_delta = 25
+
+[output]
+format = "markdown"
+path = "./audit-report.md"
+exit_code_on_critical = 1
+exit_code_on_warning = 0

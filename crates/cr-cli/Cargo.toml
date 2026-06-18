@@ -1,0 +1,29 @@
+[package]
+name = "cr-cli"
+description = "CodeRoughcollie 命令行入口"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+version.workspace = true
+
+[[bin]]
+name = "coderc"
+path = "src/main.rs"
+
+[dependencies]
+cr-core = { workspace = true }
+cr-report = { workspace = true }
+cr-audit-static = { workspace = true }
+cr-audit-explain = { workspace = true }
+cr-audit-complexity = { workspace = true }
+cr-config = { workspace = true }
+cr-db = { workspace = true }
+cr-git = { workspace = true }
+clap = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+serde_json = { workspace = true }
+
+[lints]
+workspace = true

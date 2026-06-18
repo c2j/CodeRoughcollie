@@ -1,0 +1,15 @@
+[package]
+name = "cr-config"
+description = "TOML 配置解析"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+version.workspace = true
+
+[dependencies]
+serde = { workspace = true }
+thiserror = { workspace = true }
+toml = "0.8"
+
+[lints]
+workspace = true

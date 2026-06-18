@@ -1,0 +1,18 @@
+[package]
+name = "cr-core"
+description = "CodeRoughcollie 审核引擎核心：类型、trait、错误、调度"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+version.workspace = true
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+async-trait = { workspace = true }
+regex = { workspace = true }
+
+[lints]
+workspace = true

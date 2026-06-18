@@ -1,0 +1,22 @@
+[package]
+name = "cr-mcp-server"
+description = "MCP Server：基于 rmcp，暴露审核工具给 AI 助手（三期）"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+version.workspace = true
+
+[dependencies]
+rmcp = { workspace = true }
+schemars = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true, features = ["fs", "io-std"] }
+tracing = { workspace = true }
+cr-core = { workspace = true }
+cr-audit-static = { workspace = true }
+cr-audit-complexity = { workspace = true }
+cr-report = { workspace = true }
+
+[lints]
+workspace = true

@@ -1,0 +1,69 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/cr-core",
+    "crates/cr-db",
+    "crates/cr-git",
+    "crates/cr-config",
+    "crates/cr-report",
+    "crates/cr-audit-static",
+    "crates/cr-audit-explain",
+    "crates/cr-audit-complexity",
+    "crates/cr-audit-impact",
+    "crates/cr-plugin",
+    "crates/cr-mcp-server",
+    "crates/cr-cli",
+    "crates/cr-server",
+]
+
+[workspace.package]
+edition = "2021"
+rust-version = "1.75"
+license = "MIT OR Apache-2.0"
+version = "0.1.0"
+
+[workspace.dependencies]
+# 内部 crate 间依赖
+cr-core = { path = "crates/cr-core" }
+cr-db = { path = "crates/cr-db" }
+cr-git = { path = "crates/cr-git" }
+cr-config = { path = "crates/cr-config" }
+cr-report = { path = "crates/cr-report" }
+cr-audit-static = { path = "crates/cr-audit-static" }
+cr-audit-explain = { path = "crates/cr-audit-explain" }
+cr-audit-complexity = { path = "crates/cr-audit-complexity" }
+cr-audit-impact = { path = "crates/cr-audit-impact" }
+cr-plugin = { path = "crates/cr-plugin" }
+cr-server = { path = "crates/cr-server" }
+
+# 共享第三方依赖
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+tracing = "0.1"
+clap = { version = "4", features = ["derive"] }
+async-trait = "0.1"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time"] }
+regex = "1"
+
+# 生态依赖（子模块 path 引用）
+ogsql-parser = { path = "lib/ogsql-parser" }
+ogexplain-core = { path = "lib/ogexplain-analyzer/crates/ogexplain-core" }
+ogsql-complexity = { path = "lib/ogexplain-analyzer/crates/ogsql-complexity" }
+tokio-opengauss = { path = "lib/rust-opengauss/crates/tokio-opengauss" }
+metamorphosis-core = { path = "lib/metamorphosis/crates/core" }
+metamorphosis-rules = { path = "lib/metamorphosis/crates/rules" }
+rmcp = { version = "0.16", features = ["server", "macros", "schemars", "transport-io"] }
+schemars = "1"
+
+# 将 ogexplain-core 内部的 git 依赖重定向到本地子模块
+[patch."https://github.com/c2j/ogsql-parser"]
+ogsql-parser = { path = "lib/ogsql-parser" }
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true
+
+[workspace.lints.clippy]
+unwrap_used = "warn"

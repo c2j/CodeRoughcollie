@@ -1,0 +1,20 @@
+[package]
+name = "cr-db"
+description = "CodeRoughcollie 数据库连接层：连接池、认证、权限校验、EXPLAIN 执行"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+version.workspace = true
+
+[dependencies]
+cr-core = { workspace = true }
+async-trait = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+tokio-opengauss = { workspace = true }
+tokio = { workspace = true }
+regex = { workspace = true }
+parking_lot = "0.12"
+
+[lints]
+workspace = true

@@ -1,0 +1,15 @@
+[package]
+name = "cr-audit-explain"
+description = "真实执行计划审核：EXPLAIN ANALYZE + ogexplain-core 规则诊断"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+version.workspace = true
+
+[dependencies]
+cr-core = { workspace = true }
+ogexplain-core = { workspace = true }
+serde = { workspace = true }
+
+[lints]
+workspace = true
