@@ -69,6 +69,9 @@ jobs:
     name: Build windows-x86_64
     runs-on: windows-2022
     steps:
+      - name: Enable long paths
+        run: git config --global core.longpaths true
+        shell: bash
       - uses: actions/checkout@v4
         with:
           submodules: true
@@ -77,6 +80,8 @@ jobs:
           targets: x86_64-pc-windows-gnu
       - run: cargo build --release --target x86_64-pc-windows-gnu
         env:
+          CARGO_NET_GIT_FETCH_WITH_CLI: "true"
+          CARGO_HOME: C:\cargo
           RUSTFLAGS: "-C target-feature=+crt-static"
       - shell: pwsh
         run: |
