@@ -8,7 +8,7 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
-  OUR_CRATES: -p cr-core -p cr-db -p cr-git -p cr-config -p cr-report -p cr-audit-static -p cr-audit-explain -p cr-audit-complexity -p cr-audit-impact -p cr-plugin -p cr-mcp-server -p cr-cli -p cr-server
+  OUR_CRATES: -p cr-core -p cr-db -p cr-git -p cr-config -p cr-report -p cr-audit-static -p cr-audit-complexity -p cr-audit-impact -p cr-plugin -p cr-mcp-server -p cr-cli -p cr-server
 
 jobs:
   test:
