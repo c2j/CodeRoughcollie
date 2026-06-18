@@ -177,16 +177,18 @@ fn check_rule(sql: &str, rule: &ComplianceRule) -> Option<Finding> {
         "COMPLIANCE-INT-002" => check_int_002(sql),
         _ => None,
     }
-    .map(|detail| Finding {
-        rule_id: rule.id.to_owned(),
-        severity: rule.severity,
-        category: DiagnosticCategory::General,
-        title: rule.description.to_owned(),
+    .map(|detail| Finding::new(
+        rule.id,
+        rule.severity,
+        DiagnosticCategory::General,
+        rule.description,
         detail,
-        node_line: None,
-        node_type: None,
-        suggestion: None,
-    })
+        "<compliance>",
+        None,
+        None,
+        None,
+        None,
+    ))
 }
 
 /// PCI-001：信用卡号模式。
