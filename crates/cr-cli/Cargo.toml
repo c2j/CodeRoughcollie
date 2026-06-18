@@ -14,7 +14,7 @@ path = "src/main.rs"
 cr-core = { workspace = true }
 cr-report = { workspace = true }
 cr-audit-static = { workspace = true }
-cr-audit-explain = { workspace = true }
+# cr-audit-explain temporarily disabled — ogexplain-analyzer#12
 cr-audit-complexity = { workspace = true }
 cr-config = { workspace = true }
 cr-db = { workspace = true }

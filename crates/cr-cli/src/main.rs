@@ -262,20 +262,11 @@ async fn audit_sql_file(
         config.rules.complexity.critical_delta,
     ));
 
-    if let Some(conn) = db_conn {
-        tracing::debug!("EXPLAIN 审核中");
-        let timeout = config.database.explain.timeout_seconds;
-        match cr_db::execute_explain(conn.client(), sql, timeout).await {
-            Ok(explain_text) => match cr_audit_explain::analyze_explain_text(&explain_text) {
-                Ok(explain_findings) => findings.extend(explain_findings),
-                Err(e) => {
-                    tracing::warn!(error = %e, "EXPLAIN 解析失败，跳过执行计划审核");
-                }
-            },
-            Err(e) => {
-                tracing::warn!(error = %e, "EXPLAIN 执行失败，该 SQL 仅静态审核");
-            }
-        }
+    if let Some(_conn) = db_conn {
+        // EXPLAIN analysis temporarily disabled — ogexplain-analyzer#12
+        // tracing::debug!("EXPLAIN 审核中");
+        // ... cr_audit_explain::analyze_explain_text ...
+        tracing::debug!("EXPLAIN 审核已禁用（ogexplain-core 兼容性问题）");
     }
 
     findings
