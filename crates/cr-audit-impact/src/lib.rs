@@ -181,6 +181,8 @@ pub fn impact_to_findings(result: &ImpactResult, changed_file: &str) -> Vec<cr_c
             cr_core::DiagnosticCategory::General,
             "高影响变更",
             format!("文件 `{changed_file}` 有 {upstream_count} 个上游调用者，变更影响范围较大，建议仔细审查"),
+            changed_file,
+            None,
             None,
             None,
             Some(format!("上游调用者列表：{}", callers.join(", "))),
