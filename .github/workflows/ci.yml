@@ -8,6 +8,7 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
+  OUR_CRATES: -p cr-core -p cr-db -p cr-git -p cr-config -p cr-report -p cr-audit-static -p cr-audit-explain -p cr-audit-complexity -p cr-audit-impact -p cr-plugin -p cr-mcp-server -p cr-cli -p cr-server
 
 jobs:
   test:
@@ -18,7 +19,7 @@ jobs:
         with:
           submodules: true
       - uses: dtolnay/rust-toolchain@stable
-      - run: cargo test --workspace
+      - run: cargo test $OUR_CRATES
 
   clippy:
     name: Clippy
@@ -30,7 +31,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
-      - run: cargo clippy --workspace -- -D warnings
+      - run: cargo clippy $OUR_CRATES -- -D warnings
 
   fmt:
     name: Format
@@ -40,7 +41,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt
-      - run: cargo fmt --all -- --check
+      - run: cargo fmt $OUR_CRATES -- --check
 
   audit:
     name: Security Audit
