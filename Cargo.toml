@@ -47,7 +47,7 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros", "time"] }
 regex = "1"
 
 # 生态依赖（子模块 path 引用）
-ogsql-parser = { path = "lib/ogsql-parser" }
+ogsql-parser = { git = "https://github.com/c2j/ogsql-parser" }
 ogexplain-core = { path = "lib/ogexplain-analyzer/crates/ogexplain-core" }
 ogsql-complexity = { path = "lib/ogexplain-analyzer/crates/ogsql-complexity" }
 tokio-opengauss = { path = "lib/rust-opengauss/crates/tokio-opengauss" }
@@ -55,10 +55,6 @@ metamorphosis-core = { path = "lib/metamorphosis/crates/core" }
 metamorphosis-rules = { path = "lib/metamorphosis/crates/rules" }
 rmcp = { version = "0.16", features = ["server", "macros", "schemars", "transport-io"] }
 schemars = "1"
-
-# 将 ogexplain-core 内部的 git 依赖重定向到本地子模块
-[patch."https://github.com/c2j/ogsql-parser"]
-ogsql-parser = { path = "lib/ogsql-parser" }
 
 [profile.release]
 lto = true
