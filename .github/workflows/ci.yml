@@ -38,10 +38,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: true
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt
-      - run: cargo fmt $OUR_CRATES -- --check
+      - run: cargo fmt ${{ env.OUR_CRATES }} -- --check
 
   audit:
     name: Security Audit
