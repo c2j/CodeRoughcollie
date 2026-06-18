@@ -13,12 +13,6 @@
 [submodule "lib/codeweb"]
 	path = lib/codeweb
 	url = https://github.com/c2j/codeweb.git
-[submodule "lib/flux-gauss"]
-	path = lib/flux-gauss
-	url = https://github.com/c2j/flux-gauss.git
-[submodule "lib/WDRProbe"]
-	path = lib/WDRProbe
-	url = https://github.com/c2j/WDRProbe.git
 [submodule "lib/astgrep"]
 	path = lib/astgrep
 	url = https://github.com/c2j/astgrep.git
