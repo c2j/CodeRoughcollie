@@ -97,6 +97,10 @@ pub struct Finding {
     pub title: String,
     /// 详细描述。
     pub detail: String,
+    /// 来源文件路径。
+    pub file_path: String,
+    /// 触发规则的代码片段（可选）。
+    pub code_snippet: Option<String>,
     /// 执行计划中的节点行号（可选）。
     pub node_line: Option<usize>,
     /// 执行计划中的节点类型（可选），如 `"Seq Scan"`、`"Hash Join"`。
@@ -117,6 +121,8 @@ impl Finding {
         category: DiagnosticCategory,
         title: impl Into<String>,
         detail: impl Into<String>,
+        file_path: impl Into<String>,
+        code_snippet: Option<String>,
         node_line: Option<usize>,
         node_type: Option<String>,
         suggestion: Option<String>,
@@ -127,6 +133,8 @@ impl Finding {
             category,
             title: title.into(),
             detail: detail.into(),
+            file_path: file_path.into(),
+            code_snippet,
             node_line,
             node_type,
             suggestion,
@@ -199,6 +207,8 @@ mod tests {
             DiagnosticCategory::General,
             "Test finding",
             "A detailed description",
+            "src/test.sql",
+            Some("SELECT * FROM users".into()),
             Some(42),
             Some("Seq Scan".into()),
             Some("Add an index".into()),
@@ -208,6 +218,8 @@ mod tests {
         assert_eq!(finding.category, DiagnosticCategory::General);
         assert_eq!(finding.title, "Test finding");
         assert_eq!(finding.detail, "A detailed description");
+        assert_eq!(finding.file_path, "src/test.sql");
+        assert_eq!(finding.code_snippet, Some("SELECT * FROM users".into()));
         assert_eq!(finding.node_line, Some(42));
         assert_eq!(finding.node_type, Some("Seq Scan".into()));
         assert_eq!(finding.suggestion, Some("Add an index".into()));
@@ -221,12 +233,16 @@ mod tests {
             DiagnosticCategory::ScanEfficiency,
             "Info only",
             "Just info",
+            "src/test.sql",
+            None,
             None,
             None,
             None,
         );
         assert_eq!(finding.rule_id, "TEST-002");
         assert_eq!(finding.severity, Severity::Info);
+        assert_eq!(finding.file_path, "src/test.sql");
+        assert_eq!(finding.code_snippet, None);
         assert_eq!(finding.node_line, None);
         assert_eq!(finding.node_type, None);
         assert_eq!(finding.suggestion, None);
