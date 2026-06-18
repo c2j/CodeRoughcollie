@@ -73,7 +73,7 @@ async fn run_audit_handler(
     State(store): State<Arc<AuditStore>>,
     Json(req): Json<AuditRequest>,
 ) -> Result<Json<AuditResponse>, ServerError> {
-    let findings = audit_sql(&req.sql);
+    let findings = audit_sql(&req.sql, "<inline>");
     let score = health_score(&findings);
 
     let audit_id = generate_audit_id(&req.commit_sha);
