@@ -110,8 +110,16 @@ mod tests {
 
     fn make_finding(severity: Severity) -> Finding {
         Finding::new(
-            "TEST", severity, DiagnosticCategory::General, "test", "test detail",
-            "test.sql", None, None, None, None,
+            "TEST",
+            severity,
+            DiagnosticCategory::General,
+            "test",
+            "test detail",
+            "test.sql",
+            None,
+            None,
+            None,
+            None,
         )
     }
 

@@ -4,7 +4,7 @@
 
 use std::collections::BTreeMap;
 
-use cr_core::scoring::{SeverityCounts, HealthGrade};
+use cr_core::scoring::{HealthGrade, SeverityCounts};
 use cr_core::{Finding, Severity};
 
 /// 报告输出格式。
@@ -124,10 +124,7 @@ fn render_summary(out: &mut String, ctx: &RenderContext) {
 
     let grade_icon = ctx.health_grade.icon();
     let grade_label = ctx.health_grade.as_str();
-    out.push_str(&format!(
-        "| 健康度评分 | {grade_icon} **{:.0}/100**（{grade_label}） |\n",
-        ctx.health_score
-    ));
+    out.push_str(&format!("| 健康度评分 | {grade_icon} **{:.0}/100**（{grade_label}） |\n", ctx.health_score));
 
     let total = ctx.severity_counts.total();
     let c = ctx.severity_counts.critical;
@@ -193,12 +190,7 @@ fn render_file_details(out: &mut String, findings: &[Finding]) {
         });
 
         for f in &sorted {
-            out.push_str(&format!(
-                "#### {} [{}] {}\n\n",
-                f.severity.icon(),
-                f.rule_id,
-                f.title,
-            ));
+            out.push_str(&format!("#### {} [{}] {}\n\n", f.severity.icon(), f.rule_id, f.title,));
 
             // 位置信息
             if let Some(line) = f.node_line {
@@ -239,11 +231,7 @@ fn render_rule_stats(out: &mut String, findings: &[Finding]) {
     }
 
     for (rule_id, (count, severity)) in &by_rule {
-        out.push_str(&format!(
-            "| `{rule_id}` | {count} | {} {} |\n",
-            severity.icon(),
-            severity.as_str(),
-        ));
+        out.push_str(&format!("| `{rule_id}` | {count} | {} {} |\n", severity.icon(), severity.as_str(),));
     }
     out.push('\n');
 }
@@ -261,20 +249,20 @@ pub fn render_sarif(findings: &[Finding]) -> String {
         .iter()
         .map(|f| {
             serde_json::json!({
-                "ruleId": f.rule_id,
-                "level": match f.severity {
-                    cr_core::Severity::Critical => "error",
-                    cr_core::Severity::Warning => "warning",
-                    _ => "note",
-                },
-                "message": { "text": &f.detail },
-                "locations": [{
-                    "physicalLocation": {
-                        "artifactLocation": { "uri": &f.file_path },
-                        "region": f.node_line.map(|l| serde_json::json!({ "startLine": l }))
-}
-                }]
-            })
+                            "ruleId": f.rule_id,
+                            "level": match f.severity {
+                                cr_core::Severity::Critical => "error",
+                                cr_core::Severity::Warning => "warning",
+                                _ => "note",
+                            },
+                            "message": { "text": &f.detail },
+                            "locations": [{
+                                "physicalLocation": {
+                                    "artifactLocation": { "uri": &f.file_path },
+                                    "region": f.node_line.map(|l| serde_json::json!({ "startLine": l }))
+            }
+                            }]
+                        })
         })
         .collect();
 
@@ -311,7 +299,7 @@ pub fn render_csv(findings: &[Finding]) -> String {
         out.push(',');
         match f.node_line {
             Some(line) => out.push_str(&line.to_string()),
-            None => {},
+            None => {}
         }
         out.push(',');
         push_csv_field(&mut out, &f.rule_id);
@@ -326,17 +314,17 @@ pub fn render_csv(findings: &[Finding]) -> String {
         out.push(',');
         match &f.node_type {
             Some(nt) => push_csv_field(&mut out, nt),
-            None => {},
+            None => {}
         }
         out.push(',');
         match &f.suggestion {
             Some(s) => push_csv_field(&mut out, s),
-            None => {},
+            None => {}
         }
         out.push(',');
         match &f.code_snippet {
             Some(s) => push_csv_field(&mut out, s),
-            None => {},
+            None => {}
         }
         out.push('\n');
     }
@@ -427,26 +415,13 @@ mod tests {
         let severity_counts = cr_core::scoring::count_by_severity(&findings);
         let hs = cr_core::scoring::health_score(&findings);
         let hg = HealthGrade::from_score(hs);
-        RenderContext::new(
-            findings,
-            severity_counts,
-            hs,
-            hg,
-            "feature/test".into(),
-            false,
-        )
+        RenderContext::new(findings, severity_counts, hs, hg, "feature/test".into(), false)
     }
 
     #[test]
     fn test_render_markdown_empty() {
-        let ctx = RenderContext::new(
-            vec![],
-            SeverityCounts::default(),
-            100.0,
-            HealthGrade::Excellent,
-            "main".into(),
-            false,
-        );
+        let ctx =
+            RenderContext::new(vec![], SeverityCounts::default(), 100.0, HealthGrade::Excellent, "main".into(), false);
         let output = render_markdown(&ctx);
         assert!(output.contains("审核通过"));
     }

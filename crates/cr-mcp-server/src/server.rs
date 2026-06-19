@@ -87,7 +87,8 @@ impl CodeRoughcollieServer {
         description = "Compare SQL complexity score against a baseline. Returns delta and findings if thresholds exceeded."
     )]
     async fn compare_baseline(&self, Parameters(params): Parameters<CompareBaselineParams>) -> String {
-        let findings = cr_audit_complexity::audit_complexity(&params.sql, "<inline>", Some(params.baseline_score), 10.0, 25.0);
+        let findings =
+            cr_audit_complexity::audit_complexity(&params.sql, "<inline>", Some(params.baseline_score), 10.0, 25.0);
         serde_json::to_string_pretty(&findings)
             .unwrap_or_else(|e| format!(r#"{{"error": "serialization failed: {e}"}}"#))
     }
