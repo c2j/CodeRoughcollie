@@ -79,6 +79,28 @@ impl HealthGrade {
             _ => Self::Poor,
         }
     }
+
+    /// 返回中文标签。
+    #[must_use]
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Excellent => "优秀",
+            Self::Good => "良好",
+            Self::Fair => "一般",
+            Self::Poor => "差",
+        }
+    }
+
+    /// 返回对应的 emoji 图标。
+    #[must_use]
+    pub fn icon(&self) -> &'static str {
+        match self {
+            Self::Excellent => "🟢",
+            Self::Good => "🟡",
+            Self::Fair => "🟠",
+            Self::Poor => "🔴",
+        }
+    }
 }
 
 #[cfg(test)]
@@ -87,7 +109,10 @@ mod tests {
     use crate::types::DiagnosticCategory;
 
     fn make_finding(severity: Severity) -> Finding {
-        Finding::new("TEST", severity, DiagnosticCategory::General, "test", "test detail", None, None, None)
+        Finding::new(
+            "TEST", severity, DiagnosticCategory::General, "test", "test detail",
+            "test.sql", None, None, None, None,
+        )
     }
 
     #[test]

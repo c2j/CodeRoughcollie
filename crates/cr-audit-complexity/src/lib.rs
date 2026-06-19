@@ -43,6 +43,7 @@ pub use ogsql_complexity::{
 /// # 参数
 ///
 /// * `sql`            - SQL 文本。
+/// * `file_path`      - 来源文件路径。
 /// * `baseline_score` - 可选的历史基线分数。为 `Some(score)` 时计算增量，
 ///   否则仅检查绝对分数。
 /// * `warning_delta`  - 增量警告阈值。增量超过此值但未达 `critical_delta`
@@ -64,6 +65,7 @@ pub use ogsql_complexity::{
 #[must_use]
 pub fn audit_complexity(
     sql: &str,
+    file_path: &str,
     baseline_score: Option<f64>,
     warning_delta: f64,
     critical_delta: f64,
@@ -90,6 +92,8 @@ pub fn audit_complexity(
                 format!(
                     "复杂度从基线 {baseline:.1} 上升至 {score:.1}（Δ={delta:.1}），超过严重阈值 {critical_delta:.1}"
                 ),
+                file_path,
+                None,
                 None,
                 None,
                 None,
@@ -103,6 +107,8 @@ pub fn audit_complexity(
                 format!(
                     "复杂度从基线 {baseline:.1} 上升至 {score:.1}（Δ={delta:.1}），超过警告阈值 {warning_delta:.1}"
                 ),
+                file_path,
+                None,
                 None,
                 None,
                 None,
@@ -115,6 +121,8 @@ pub fn audit_complexity(
             cr_core::DiagnosticCategory::General,
             "高复杂度",
             format!("SQL 复杂度评分为 {score:.1}，超过高复杂度阈值 66，建议优化"),
+            file_path,
+            None,
             None,
             None,
             None,
@@ -165,14 +173,14 @@ mod tests {
     #[test]
     fn audit_no_baseline_low_score() {
         let sql = "SELECT * FROM t1";
-        let findings = audit_complexity(sql, None, 10.0, 20.0);
+        let findings = audit_complexity(sql, "test.sql", None, 10.0, 20.0);
         assert!(findings.is_empty(), "low complexity should have no findings");
     }
 
     #[test]
     fn audit_baseline_within_delta() {
         let sql = "SELECT * FROM t1";
-        let findings = audit_complexity(sql, Some(5.0), 10.0, 20.0);
+        let findings = audit_complexity(sql, "test.sql", Some(5.0), 10.0, 20.0);
         assert!(findings.is_empty(), "small delta should have no findings");
     }
 }

@@ -25,7 +25,7 @@ impl CodeRoughcollieServer {
     /// Audit SQL text for anti-patterns and return findings as JSON.
     #[rmcp::tool(name = "audit_sql", description = "Audit SQL for anti-patterns. Returns findings as JSON array.")]
     async fn audit_sql(&self, Parameters(params): Parameters<SqlParams>) -> String {
-        let findings = cr_audit_static::audit_sql(&params.sql);
+        let findings = cr_audit_static::audit_sql(&params.sql, "<inline>");
         serde_json::to_string_pretty(&findings)
             .unwrap_or_else(|e| format!(r#"{{"error": "serialization failed: {e}"}}"#))
     }
@@ -36,8 +36,8 @@ impl CodeRoughcollieServer {
         description = "Explain SQL: run static anti-pattern detection + complexity scoring. Returns findings with rule IDs, severity, and suggestions."
     )]
     async fn explain_sql(&self, Parameters(params): Parameters<SqlParams>) -> String {
-        let mut findings = cr_audit_static::audit_sql(&params.sql);
-        findings.extend(cr_audit_complexity::audit_complexity(&params.sql, None, 10.0, 25.0));
+        let mut findings = cr_audit_static::audit_sql(&params.sql, "<inline>");
+        findings.extend(cr_audit_complexity::audit_complexity(&params.sql, "<inline>", None, 10.0, 25.0));
         serde_json::to_string_pretty(&serde_json::json!({
             "sql": &params.sql,
             "finding_count": findings.len(),
@@ -66,7 +66,7 @@ impl CodeRoughcollieServer {
         for path in &params.files {
             match tokio::fs::read_to_string(path).await {
                 Ok(content) => {
-                    let findings = cr_audit_static::audit_sql(&content);
+                    let findings = cr_audit_static::audit_sql(&content, path);
                     all_findings.extend(findings);
                 }
                 Err(e) => {
@@ -87,7 +87,7 @@ impl CodeRoughcollieServer {
         description = "Compare SQL complexity score against a baseline. Returns delta and findings if thresholds exceeded."
     )]
     async fn compare_baseline(&self, Parameters(params): Parameters<CompareBaselineParams>) -> String {
-        let findings = cr_audit_complexity::audit_complexity(&params.sql, Some(params.baseline_score), 10.0, 25.0);
+        let findings = cr_audit_complexity::audit_complexity(&params.sql, "<inline>", Some(params.baseline_score), 10.0, 25.0);
         serde_json::to_string_pretty(&findings)
             .unwrap_or_else(|e| format!(r#"{{"error": "serialization failed: {e}"}}"#))
     }

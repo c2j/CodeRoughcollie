@@ -503,6 +503,7 @@ dependencies = [
  "cr-db",
  "cr-git",
  "cr-report",
+ "encoding_rs",
  "serde_json",
  "tokio",
  "tracing",

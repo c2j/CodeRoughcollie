@@ -2,6 +2,8 @@ use std::path::PathBuf;
 
 use clap::{Parser, Subcommand};
 
+use encoding_rs::Encoding;
+
 /// CodeRoughcollie — GaussDB/openGauss 代码审核工具。
 #[derive(Parser)]
 #[command(name = "coderc", version, about, long_about = None)]
@@ -88,6 +90,40 @@ fn main() {
 }
 
 #[allow(clippy::too_many_arguments)]
+/// Read a file with automatic encoding detection.
+///
+/// Tries: UTF-8 → GB18030 → Shift_JIS → EUC-JP → EUC-KR → BIG5 →
+/// ISO-2022-JP → UTF-16LE/BE → lossy UTF-8 fallback.
+fn read_file_with_encoding(path: &std::path::Path) -> std::io::Result<String> {
+    let bytes = std::fs::read(path)?;
+
+    if let Ok(s) = String::from_utf8(bytes.clone()) {
+        return Ok(s);
+    }
+
+    let encodings: &[(&'static Encoding, &'static str)] = &[
+        (encoding_rs::GB18030, "GB18030"),
+        (encoding_rs::SHIFT_JIS, "Shift_JIS"),
+        (encoding_rs::EUC_JP, "EUC-JP"),
+        (encoding_rs::EUC_KR, "EUC-KR"),
+        (encoding_rs::BIG5, "BIG5"),
+        (encoding_rs::ISO_2022_JP, "ISO-2022-JP"),
+        (encoding_rs::UTF_16LE, "UTF-16LE"),
+        (encoding_rs::UTF_16BE, "UTF-16BE"),
+    ];
+
+    for (encoding, name) in encodings {
+        let (cow, _, had_errors) = encoding.decode(&bytes);
+        if !had_errors {
+            tracing::debug!(path = %path.display(), encoding = name, "detected file encoding");
+            return Ok(cow.into_owned());
+        }
+    }
+
+    tracing::debug!(path = %path.display(), "falling back to lossy UTF-8");
+    Ok(String::from_utf8_lossy(&bytes).into_owned())
+}
+
 fn run_audit(
     baseline: &str,
     files: &[PathBuf],
@@ -130,10 +166,20 @@ fn run_audit(
 
     let format = cr_report::ReportFormat::parse(output_format).unwrap_or(cr_report::ReportFormat::Markdown);
 
-    let mut report = cr_report::render(&all_findings, format);
-    if degraded {
-        report = format!("> ⚠️ **[EXPLAIN 降级：静态分析]**\n\n{report}");
-    }
+    let severity_counts = cr_core::scoring::count_by_severity(&all_findings);
+    let hs = cr_core::scoring::health_score(&all_findings);
+    let hg = cr_core::scoring::HealthGrade::from_score(hs);
+
+    let ctx = cr_report::RenderContext::new(
+        all_findings,
+        severity_counts,
+        hs,
+        hg,
+        baseline.to_string(),
+        degraded,
+    );
+
+    let report = cr_report::render(&ctx, format);
 
     match output_path {
         Some(path) => {
@@ -143,10 +189,9 @@ fn run_audit(
         None => println!("{report}"),
     }
 
-    let counts = cr_core::scoring::count_by_severity(&all_findings);
-    tracing::info!(critical = counts.critical, warning = counts.warning, info = counts.info, "审核完成");
+    tracing::info!(critical = ctx.severity_counts.critical, warning = ctx.severity_counts.warning, info = ctx.severity_counts.info, health_score = ctx.health_score, "审核完成");
 
-    if counts.has_critical() {
+    if ctx.severity_counts.has_critical() {
         std::process::exit(1);
     }
 }
@@ -208,7 +253,7 @@ async fn audit_all_files(
     };
 
     for file_path in files {
-        let content = match std::fs::read_to_string(file_path) {
+        let content = match read_file_with_encoding(file_path) {
             Ok(c) => c,
             Err(e) => {
                 tracing::warn!(path = %file_path.display(), error = %e, "读取文件失败，跳过");
@@ -216,20 +261,21 @@ async fn audit_all_files(
             }
         };
 
+        let file_path_str = file_path.to_string_lossy().to_string();
         let ext = file_path.extension().and_then(|e| e.to_str()).unwrap_or("");
         let mut findings = match ext {
-            "sql" => audit_sql_file(&content, &db_conn, config).await,
+            "sql" => audit_sql_file(&content, &file_path_str, &db_conn, config).await,
             "xml" => {
                 tracing::debug!(path = %file_path.display(), "MyBatis XML 安全扫描中");
-                cr_audit_static::java_security::audit_mybatis_xml(&content)
+                cr_audit_static::java_security::audit_mybatis_xml(&content, &file_path_str)
             }
             "java" => {
                 tracing::debug!(path = %file_path.display(), "Java 安全扫描中");
-                cr_audit_static::java_security::audit_java_source(&content)
+                cr_audit_static::java_security::audit_java_source(&content, &file_path_str)
             }
             _ => {
                 tracing::debug!(path = %file_path.display(), ext = ext, "未知文件类型，尝试 SQL 审核");
-                audit_sql_file(&content, &db_conn, config).await
+                audit_sql_file(&content, &file_path_str, &db_conn, config).await
             }
         };
 
@@ -246,17 +292,19 @@ async fn audit_all_files(
 
 async fn audit_sql_file(
     sql: &str,
+    file_path: &str,
     db_conn: &Option<cr_db::GaussDbConnection>,
     config: &cr_config::Config,
 ) -> Vec<cr_core::Finding> {
     let mut findings = Vec::new();
 
     tracing::debug!("静态审核中");
-    findings.extend(cr_audit_static::audit_sql(sql));
+    findings.extend(cr_audit_static::audit_sql(sql, file_path));
 
     tracing::debug!("复杂度审核中");
     findings.extend(cr_audit_complexity::audit_complexity(
         sql,
+        file_path,
         None,
         config.rules.complexity.warning_delta,
         config.rules.complexity.critical_delta,

@@ -50,10 +50,13 @@ pub struct ExplainFinding {
 /// let text = "Seq Scan on t1  (cost=0.00..35.00 rows=2500 width=4)";
 /// let findings = analyze_explain_text(text)?;
 /// ```
-pub fn analyze_explain_text(explain_text: &str) -> Result<Vec<cr_core::Finding>, cr_core::RoughcollieError> {
+pub fn analyze_explain_text(
+    explain_text: &str,
+    file_path: &str,
+) -> Result<Vec<cr_core::Finding>, cr_core::RoughcollieError> {
     let plan = parse(explain_text).map_err(map_parse_error)?;
     let report = analyze(&plan);
-    Ok(report.findings.into_iter().map(convert_finding).collect())
+    Ok(report.findings.into_iter().map(|f| convert_finding(f, file_path)).collect())
 }
 
 /// 解析 EXPLAIN TEXT 并运行指定规则的诊断，返回审核发现。
@@ -77,13 +80,14 @@ pub fn analyze_explain_text(explain_text: &str) -> Result<Vec<cr_core::Finding>,
 /// ```
 pub fn analyze_explain_with_config(
     explain_text: &str,
+    file_path: &str,
     disabled_rules: &[String],
 ) -> Result<Vec<cr_core::Finding>, cr_core::RoughcollieError> {
     let plan = parse(explain_text).map_err(map_parse_error)?;
     let config =
         ogexplain_core::analyzer::DiagnosticConfig { disabled_rules: disabled_rules.to_vec(), ..Default::default() };
     let report = analyze_with_config(&plan, &config);
-    Ok(report.findings.into_iter().map(convert_finding).collect())
+    Ok(report.findings.into_iter().map(|f| convert_finding(f, file_path)).collect())
 }
 
 // ---------------------------------------------------------------------------
@@ -96,13 +100,15 @@ pub fn analyze_explain_with_config(
 /// - `rule_id`、`title`、`detail`、`node_line`、`node_type`、`suggestion` 直接复制
 /// - `severity` / `category` 通过枚举变体一一映射
 /// - `sql_rewrite`、`evidence` 暂不纳入 cr-core 发现（保留扩展空间）
-fn convert_finding(f: ogexplain_core::analyzer::Finding) -> cr_core::Finding {
+fn convert_finding(f: ogexplain_core::analyzer::Finding, file_path: &str) -> cr_core::Finding {
     cr_core::Finding::new(
         f.rule_id,
         convert_severity(f.severity),
         convert_category(f.category),
         f.title,
         f.detail,
+        file_path,
+        None,
         f.node_line,
         f.node_type,
         f.suggestion,
