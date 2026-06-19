@@ -24,7 +24,7 @@ enum Commands {
         #[arg(long, value_delimiter = ',')]
         files: Vec<PathBuf>,
 
-        /// 输出格式：markdown / json / sarif。
+        /// 输出格式：markdown / json / sarif / csv。
         #[arg(long, default_value = "markdown")]
         output_format: String,
 
