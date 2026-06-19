@@ -205,8 +205,10 @@ mod tests {
 
     #[test]
     fn test_multiple_statements() {
-        let findings =
-            audit_sql("SELECT * FROM users;\nDELETE FROM orders;\nUPDATE products SET price = 10 WHERE id = 1;", "test.sql");
+        let findings = audit_sql(
+            "SELECT * FROM users;\nDELETE FROM orders;\nUPDATE products SET price = 10 WHERE id = 1;",
+            "test.sql",
+        );
         assert_eq!(findings.len(), 2);
         let rule_ids: Vec<&str> = findings.iter().map(|f| f.rule_id.as_str()).collect();
         assert!(rule_ids.contains(&"STATIC-SELECT-STAR"));

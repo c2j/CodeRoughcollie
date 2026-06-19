@@ -7,6 +7,7 @@ members = [
     "crates/cr-config",
     "crates/cr-report",
     "crates/cr-audit-static",
+    "crates/cr-audit-explain",
     "crates/cr-audit-complexity",
     "crates/cr-audit-impact",
     "crates/cr-plugin",
@@ -48,9 +49,8 @@ encoding_rs = "0.8"
 
 # 生态依赖（子模块 path 引用）
 ogsql-parser = { git = "https://github.com/c2j/ogsql-parser" }
+ogexplain-core = { path = "lib/ogexplain-analyzer/crates/ogexplain-core" }
 ogsql-complexity = { path = "lib/ogexplain-analyzer/crates/ogsql-complexity" }
-# ogexplain-core removed temporarily: ogsql-parser v0.8.1 incompatibility. See ogexplain-analyzer#12
-# ogexplain-core = { path = "lib/ogexplain-analyzer/crates/ogexplain-core" }
 tokio-opengauss = { path = "lib/rust-opengauss/crates/tokio-opengauss" }
 metamorphosis-core = { path = "lib/metamorphosis/crates/core" }
 metamorphosis-rules = { path = "lib/metamorphosis/crates/rules" }

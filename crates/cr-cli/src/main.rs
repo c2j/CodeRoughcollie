@@ -170,14 +170,7 @@ fn run_audit(
     let hs = cr_core::scoring::health_score(&all_findings);
     let hg = cr_core::scoring::HealthGrade::from_score(hs);
 
-    let ctx = cr_report::RenderContext::new(
-        all_findings,
-        severity_counts,
-        hs,
-        hg,
-        baseline.to_string(),
-        degraded,
-    );
+    let ctx = cr_report::RenderContext::new(all_findings, severity_counts, hs, hg, baseline.to_string(), degraded);
 
     let report = cr_report::render(&ctx, format);
 
@@ -189,7 +182,13 @@ fn run_audit(
         None => println!("{report}"),
     }
 
-    tracing::info!(critical = ctx.severity_counts.critical, warning = ctx.severity_counts.warning, info = ctx.severity_counts.info, health_score = ctx.health_score, "审核完成");
+    tracing::info!(
+        critical = ctx.severity_counts.critical,
+        warning = ctx.severity_counts.warning,
+        info = ctx.severity_counts.info,
+        health_score = ctx.health_score,
+        "审核完成"
+    );
 
     if ctx.severity_counts.has_critical() {
         std::process::exit(1);
@@ -310,11 +309,20 @@ async fn audit_sql_file(
         config.rules.complexity.critical_delta,
     ));
 
-    if let Some(_conn) = db_conn {
-        // EXPLAIN analysis temporarily disabled — ogexplain-analyzer#12
-        // tracing::debug!("EXPLAIN 审核中");
-        // ... cr_audit_explain::analyze_explain_text ...
-        tracing::debug!("EXPLAIN 审核已禁用（ogexplain-core 兼容性问题）");
+    if let Some(conn) = db_conn {
+        tracing::debug!("EXPLAIN 审核中");
+        let timeout = config.database.explain.timeout_seconds;
+        match cr_db::execute_explain(conn.client(), sql, timeout).await {
+            Ok(explain_text) => match cr_audit_explain::analyze_explain_text(&explain_text, "inline") {
+                Ok(explain_findings) => findings.extend(explain_findings),
+                Err(e) => {
+                    tracing::warn!(error = %e, "EXPLAIN 解析失败，跳过执行计划审核");
+                }
+            },
+            Err(e) => {
+                tracing::warn!(error = %e, "EXPLAIN 执行失败，该 SQL 仅静态审核");
+            }
+        }
     }
 
     findings
