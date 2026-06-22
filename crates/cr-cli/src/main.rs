@@ -18,9 +18,17 @@ struct Cli {
 enum Commands {
     /// 执行代码审核。
     Audit {
+        /// 配置文件路径（缺省为 .roughcollie.toml）。
+        #[arg(long)]
+        config: Option<PathBuf>,
+
         /// 审核指定项目（缺省则审核配置中所有项目）。
         #[arg(long)]
         project: Option<String>,
+
+        /// 全量审核（扫描项目 git_repo 下所有文件，而非仅 git diff 变更）。
+        #[arg(long)]
+        full: bool,
 
         /// Baseline 分支名（如 `main`、`origin/main`）。
         ///
@@ -87,7 +95,9 @@ fn main() {
     let cli = Cli::parse();
 
     let Commands::Audit {
+        config: config_path,
         project,
+        full,
         baseline,
         files,
         dir,
@@ -101,7 +111,7 @@ fn main() {
         db_password_env,
     } = cli.command;
 
-    let config = load_config();
+    let config = load_config(config_path.as_deref());
     if let Err(e) = config.validate() {
         tracing::error!(error = %e, "配置校验失败");
         std::process::exit(2);
@@ -127,6 +137,7 @@ fn main() {
         Some(name) => run_single_project(
             name,
             &config,
+            full,
             baseline.as_deref(),
             &files,
             &dir,
@@ -149,7 +160,7 @@ fn main() {
             {
                 tracing::warn!("项目级参数（--baseline/--files/--dir/--db-*）在未指定 --project 时将被忽略");
             }
-            run_all_projects(&config, format, output_path.as_deref(), no_db);
+            run_all_projects(&config, full, format, output_path.as_deref(), no_db);
         }
     }
 }
@@ -196,21 +207,21 @@ fn file_matches_project_type(cf: &cr_git::ChangedFile, project_type: Option<cr_c
     accepted
 }
 
-fn load_config() -> cr_config::Config {
-    let config_path = std::path::Path::new(".roughcollie.toml");
-    if config_path.exists() {
-        match cr_config::Config::load_from_file(config_path) {
+fn load_config(config_path: Option<&std::path::Path>) -> cr_config::Config {
+    let path = config_path.unwrap_or_else(|| std::path::Path::new(".roughcollie.toml"));
+    if path.exists() {
+        match cr_config::Config::load_from_file(path) {
             Ok(c) => {
-                tracing::info!("已加载 .roughcollie.toml");
+                tracing::info!(path = %path.display(), "已加载配置文件");
                 c
             }
             Err(e) => {
-                tracing::error!(error = %e, "解析 .roughcollie.toml 失败");
+                tracing::error!(error = %e, path = %path.display(), "解析配置文件失败");
                 std::process::exit(2);
             }
         }
     } else {
-        tracing::error!("未找到 .roughcollie.toml 配置文件");
+        tracing::error!(path = %path.display(), "未找到配置文件");
         std::process::exit(2);
     }
 }
@@ -272,6 +283,7 @@ fn discover_audit_files(
 fn run_single_project(
     name: &str,
     config: &cr_config::Config,
+    full: bool,
     cli_baseline: Option<&str>,
     files: &[PathBuf],
     dirs: &[PathBuf],
@@ -298,11 +310,17 @@ fn run_single_project(
     let repo_path = Path::new(project.git_repo.as_deref().unwrap_or("."));
     let db_config = project.database.as_ref().and_then(|n| config.databases.get(n));
 
-    if (!files.is_empty() || !dirs.is_empty()) && cli_baseline.is_some() {
-        tracing::warn!("--baseline 在指定 --files/--dir 时不会用于文件发现，仅用于报告展示");
+    if (!files.is_empty() || !dirs.is_empty() || full) && cli_baseline.is_some() {
+        tracing::warn!("--baseline 在指定 --files/--dir/--full 时不会用于文件发现，仅用于报告展示");
     }
 
-    let audit_files = discover_audit_files(files, dirs, effective_baseline, repo_path, project.project_type);
+    let full_dirs: Vec<PathBuf> = if full && files.is_empty() && dirs.is_empty() {
+        vec![repo_path.to_path_buf()]
+    } else {
+        Vec::new()
+    };
+    let effective_dirs: Vec<PathBuf> = if dirs.is_empty() { full_dirs } else { dirs.to_vec() };
+    let audit_files = discover_audit_files(files, &effective_dirs, effective_baseline, repo_path, project.project_type);
 
     tracing::info!(project = name, file_count = audit_files.len(), "开始审核");
 
@@ -358,6 +376,7 @@ fn run_single_project(
 
 fn run_all_projects(
     config: &cr_config::Config,
+    full: bool,
     format: cr_report::ReportFormat,
     output_path: Option<&std::path::Path>,
     no_db: bool,
@@ -370,15 +389,20 @@ fn run_all_projects(
         tracing::info!(project = name, "审核项目");
 
         let baseline = project.baseline.as_deref();
-        if baseline.is_none() {
-            tracing::warn!(project = name, "项目未配置 baseline，跳过");
+        if baseline.is_none() && !full {
+            tracing::warn!(project = name, "项目未配置 baseline 且未指定 --full，跳过");
             continue;
         }
 
         let repo_path = Path::new(project.git_repo.as_deref().unwrap_or("."));
         let db_config = project.database.as_ref().and_then(|n| config.databases.get(n));
 
-        let audit_files = discover_audit_files(&[], &[], baseline, repo_path, project.project_type);
+        let audit_dirs: Vec<PathBuf> = if full {
+            vec![repo_path.to_path_buf()]
+        } else {
+            Vec::new()
+        };
+        let audit_files = discover_audit_files(&[], &audit_dirs, baseline, repo_path, project.project_type);
 
         tracing::info!(project = name, file_count = audit_files.len(), "开始审核");
 
