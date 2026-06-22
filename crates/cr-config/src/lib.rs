@@ -641,6 +641,19 @@ host = "localhost"
     }
 
     #[test]
+    fn test_project_name_with_slash() {
+        let toml_content = r#"
+[projects."c2j/ogagila"]
+project_type = "gaussdb-sql"
+baseline = "main"
+"#;
+        let config: Config = toml::from_str(toml_content).unwrap();
+        let project = config.projects.get("c2j/ogagila").unwrap();
+        assert_eq!(project.project_type, Some(ProjectType::GaussdbSql));
+        assert_eq!(project.baseline.as_deref(), Some("main"));
+    }
+
+    #[test]
     fn test_config_load_nonexistent_file() {
         let path = std::env::temp_dir().join("nonexistent_config.toml");
         let _ = std::fs::remove_file(&path);
