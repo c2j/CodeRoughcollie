@@ -130,6 +130,28 @@ impl ChangedFile {
     }
 }
 
+/// 验证 baseline 是否为有效的 git commit ref。
+///
+/// 通过 `git rev-parse --verify <baseline>^{commit}` 检查。
+///
+/// # Errors
+///
+/// 当 baseline 不是有效 git ref，或 git 命令执行失败时返回错误。
+pub fn validate_baseline(baseline: &str) -> Result<(), std::io::Error> {
+    let output = Command::new("git")
+        .args(["rev-parse", "--verify", &format!("{baseline}^{{commit}}")])
+        .output()?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(std::io::Error::other(format!(
+            "无效的 baseline 分支: {baseline}: {stderr}"
+        )));
+    }
+
+    Ok(())
+}
+
 /// 获取相对于 baseline 分支的变更文件列表。
 ///
 /// # Errors
@@ -248,6 +270,26 @@ mod tests {
     fn test_extension_no_extension() {
         let file = ChangedFile::from_diff_line("A\tDockerfile").unwrap();
         assert_eq!(file.extension(), None);
+    }
+
+    // ── validate_baseline tests ───────────────────────────────
+
+    #[test]
+    fn test_validate_baseline_invalid_ref() {
+        let result = validate_baseline("__nonexistent_branch_xyz__");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_validate_baseline_empty_string() {
+        let result = validate_baseline("");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_validate_baseline_null_char() {
+        let result = validate_baseline("\0");
+        assert!(result.is_err());
     }
 
     // ── walk_directory tests ──────────────────────────────────
