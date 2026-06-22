@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use clap::{Parser, Subcommand};
 
@@ -147,6 +147,13 @@ fn run_audit(
 ) {
     let config = load_config();
 
+    if let Some(name) = &config.project.name {
+        tracing::info!(project = %name, "审核项目");
+    }
+
+    let effective_baseline = baseline.or(config.project.baseline.as_deref());
+    let repo_path = Path::new(config.project.git_repo.as_deref().unwrap_or("."));
+
     let user_explicit_sources = !files.is_empty() || !dirs.is_empty();
 
     // 告警场景 1：baseline 与显式文件源共存
@@ -172,28 +179,28 @@ fn run_audit(
 
     if !user_explicit_sources {
         // 没有 --files/--dir，必须靠 git diff，此时 baseline 必填
-        let baseline = match baseline {
+        let baseline = match effective_baseline {
             Some(b) => b,
             None => {
-                tracing::error!("未指定 --files/--dir，且未提供 --baseline，无法确定审核范围。请提供 --baseline 分支名或使用 --files/--dir 显式指定文件");
+                tracing::error!("未指定 --files/--dir，且未提供 --baseline 或配置 project.baseline，无法确定审核范围。请提供 --baseline 分支名或使用 --files/--dir 显式指定文件");
                 std::process::exit(2);
             }
         };
 
         // 预检 baseline 有效性
-        if let Err(e) = cr_git::validate_baseline(baseline) {
+        if let Err(e) = cr_git::validate_baseline(baseline, repo_path) {
             tracing::error!(error = %e, baseline = %baseline, "baseline 分支验证失败");
             std::process::exit(2);
         }
 
-        audit_files = match cr_git::changed_files(baseline) {
+        audit_files = match cr_git::changed_files(baseline, repo_path) {
             Ok(f) => {
                 // 告警场景 2：git diff 返回零文件
                 if f.is_empty() {
                     tracing::warn!(baseline = %baseline, "相对于 baseline 未发现变更文件，可能 baseline 分支名有误或确实无变更");
                 }
                 f.into_iter()
-                    .filter(|cf| cf.is_sql() || cf.is_xml() || cf.is_java())
+                    .filter(|cf| file_matches_project_type(cf, config.project.project_type))
                     .map(|cf| cf.path)
                     .collect()
             }
@@ -223,8 +230,15 @@ fn run_audit(
     let hs = cr_core::scoring::health_score(&all_findings);
     let hg = cr_core::scoring::HealthGrade::from_score(hs);
 
-    let ctx = cr_report::RenderContext::new(all_findings, severity_counts, hs, hg, baseline.unwrap_or("unknown").to_string(), degraded)
-        .with_skipped_files(skipped);
+    let ctx = cr_report::RenderContext::new(
+        all_findings,
+        severity_counts,
+        hs,
+        hg,
+        effective_baseline.unwrap_or("unknown").to_string(),
+        degraded,
+    )
+    .with_skipped_files(skipped);
 
     let report = cr_report::render(&ctx, format);
 
@@ -248,6 +262,18 @@ fn run_audit(
     if ctx.severity_counts.has_critical() {
         std::process::exit(1);
     }
+}
+
+fn file_matches_project_type(cf: &cr_git::ChangedFile, project_type: Option<cr_config::ProjectType>) -> bool {
+    let accepted = match project_type {
+        Some(cr_config::ProjectType::GaussdbSql) => cf.is_sql(),
+        Some(cr_config::ProjectType::Java) => cf.is_java() || cf.is_xml(),
+        _ => cf.is_sql() || cf.is_xml() || cf.is_java(),
+    };
+    if !accepted {
+        tracing::debug!(path = %cf.path.display(), ?project_type, "文件被 project_type 过滤");
+    }
+    accepted
 }
 
 fn load_config() -> cr_config::Config {
