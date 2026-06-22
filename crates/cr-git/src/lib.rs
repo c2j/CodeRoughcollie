@@ -1,7 +1,7 @@
 //! Git diff 解析、baseline 对比。
 
 use std::collections::BTreeSet;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 /// Supported file extensions for the audit pipeline.
@@ -132,21 +132,20 @@ impl ChangedFile {
 
 /// 验证 baseline 是否为有效的 git commit ref。
 ///
-/// 通过 `git rev-parse --verify <baseline>^{commit}` 检查。
+/// 通过在 `repo_path` 目录下执行 `git rev-parse --verify <baseline>^{commit}` 检查。
 ///
 /// # Errors
 ///
 /// 当 baseline 不是有效 git ref，或 git 命令执行失败时返回错误。
-pub fn validate_baseline(baseline: &str) -> Result<(), std::io::Error> {
+pub fn validate_baseline(baseline: &str, repo_path: &Path) -> Result<(), std::io::Error> {
     let output = Command::new("git")
         .args(["rev-parse", "--verify", &format!("{baseline}^{{commit}}")])
+        .current_dir(repo_path)
         .output()?;
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(std::io::Error::other(format!(
-            "无效的 baseline 分支: {baseline}: {stderr}"
-        )));
+        return Err(std::io::Error::other(format!("无效的 baseline 分支: {baseline}: {stderr}")));
     }
 
     Ok(())
@@ -154,11 +153,13 @@ pub fn validate_baseline(baseline: &str) -> Result<(), std::io::Error> {
 
 /// 获取相对于 baseline 分支的变更文件列表。
 ///
+/// 在 `repo_path` 目录下执行 `git diff --name-status <baseline>`。
+///
 /// # Errors
 ///
 /// 当 git 命令执行失败时返回错误。
-pub fn changed_files(baseline: &str) -> Result<Vec<ChangedFile>, std::io::Error> {
-    let output = Command::new("git").args(["diff", "--name-status", baseline]).output()?;
+pub fn changed_files(baseline: &str, repo_path: &Path) -> Result<Vec<ChangedFile>, std::io::Error> {
+    let output = Command::new("git").args(["diff", "--name-status", baseline]).current_dir(repo_path).output()?;
 
     if !output.status.success() {
         return Err(std::io::Error::other(format!("git diff failed: {}", String::from_utf8_lossy(&output.stderr))));
@@ -276,19 +277,33 @@ mod tests {
 
     #[test]
     fn test_validate_baseline_invalid_ref() {
-        let result = validate_baseline("__nonexistent_branch_xyz__");
+        let result = validate_baseline("__nonexistent_branch_xyz__", Path::new("."));
         assert!(result.is_err());
     }
 
     #[test]
     fn test_validate_baseline_empty_string() {
-        let result = validate_baseline("");
+        let result = validate_baseline("", Path::new("."));
         assert!(result.is_err());
     }
 
     #[test]
     fn test_validate_baseline_null_char() {
-        let result = validate_baseline("\0");
+        let result = validate_baseline("\0", Path::new("."));
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_validate_baseline_non_git_dir() {
+        let dir = tempfile::tempdir().unwrap();
+        let result = validate_baseline("main", dir.path());
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_changed_files_non_git_dir() {
+        let dir = tempfile::tempdir().unwrap();
+        let result = changed_files("main", dir.path());
         assert!(result.is_err());
     }
 
