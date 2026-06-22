@@ -590,7 +590,10 @@ dependencies = [
 name = "cr-git"
 version = "0.1.0"
 dependencies = [
+ "ignore",
+ "tempfile",
  "thiserror",
+ "tracing",
 ]
 
 [[package]]

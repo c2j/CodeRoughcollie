@@ -34,8 +34,29 @@ pub struct Config {
 pub struct ProjectConfig {
     /// 项目名称。
     pub name: Option<String>,
-    /// 项目根目录。
+    /// 项目根目录（reserved，未来作为文件发现基准路径）。
     pub root: Option<String>,
+    /// Git 版本库目录（git 操作工作目录），缺省为 CWD。
+    pub git_repo: Option<String>,
+    /// 项目类型，驱动审核策略。
+    pub project_type: Option<ProjectType>,
+    /// 默认 baseline 分支名，作为 `--baseline` CLI 参数的缺省值。
+    pub baseline: Option<String>,
+}
+
+/// 项目类型，驱动审核策略。
+///
+/// 未配置（`None`）时等价于 [`ProjectType::Mixed`]，保持向后兼容。
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+#[non_exhaustive]
+pub enum ProjectType {
+    /// 纯 GaussDB SQL 项目：仅审核 `.sql` 文件。
+    GaussdbSql,
+    /// 纯 Java 项目：仅审核 `.java` / MyBatis XML 文件。
+    Java,
+    /// 混合项目：审核 SQL + Java + XML（默认行为）。
+    Mixed,
 }
 
 /// `[database]` 段。
@@ -406,6 +427,9 @@ mod tests {
         let config = Config::default();
         assert!(config.project.name.is_none());
         assert!(config.project.root.is_none());
+        assert!(config.project.git_repo.is_none());
+        assert!(config.project.project_type.is_none());
+        assert!(config.project.baseline.is_none());
         assert!(!config.database.enabled);
         // serde(default = "default_port") only applies during deserialization, not Default::default()
         assert_eq!(config.database.port, 0);
@@ -501,6 +525,43 @@ disabled = ["old-plugin"]
         assert_eq!(config.notifications.slack.unwrap().channel, "#reviews");
 
         let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn test_project_type_deserialize() {
+        fn project_type_from(toml: &str) -> ProjectType {
+            let wrapped = format!("[project]\nproject_type = {toml}\n");
+            let config: Config = toml::from_str(&wrapped).unwrap();
+            config.project.project_type.unwrap()
+        }
+        assert_eq!(project_type_from("\"gaussdb-sql\""), ProjectType::GaussdbSql);
+        assert_eq!(project_type_from("\"java\""), ProjectType::Java);
+        assert_eq!(project_type_from("\"mixed\""), ProjectType::Mixed);
+    }
+
+    #[test]
+    fn test_project_type_invalid_value() {
+        let toml_content = "[project]\nproject_type = \"python\"\n";
+        let result: Result<Config, _> = toml::from_str(toml_content);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_config_project_fields_load() {
+        let toml_content = r##"
+[project]
+name = "audit-demo"
+root = "."
+git_repo = "/srv/repos/audit-demo"
+project_type = "gaussdb-sql"
+baseline = "release-v2"
+"##;
+        let config: Config = toml::from_str(toml_content).unwrap();
+        assert_eq!(config.project.name.as_deref(), Some("audit-demo"));
+        assert_eq!(config.project.root.as_deref(), Some("."));
+        assert_eq!(config.project.git_repo.as_deref(), Some("/srv/repos/audit-demo"));
+        assert_eq!(config.project.project_type, Some(ProjectType::GaussdbSql));
+        assert_eq!(config.project.baseline.as_deref(), Some("release-v2"));
     }
 
     #[test]

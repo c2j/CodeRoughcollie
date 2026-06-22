@@ -4,6 +4,9 @@
 [project]
 name = "my-gauss-app"
 root = "."
+git_repo = "."
+project_type = "mixed"
+baseline = "main"
 
 # === 数据库预置连接（可选，启用后支持真实 EXPLAIN）===
 [database]

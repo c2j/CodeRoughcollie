@@ -114,6 +114,7 @@ impl Finding {
     ///
     /// `#[non_exhaustive]` 禁止外部 crate 使用结构体字面量构造，
     /// 此方法作为受控的构造点，允许后续添加字段而不破坏下游。
+    #[allow(clippy::too_many_arguments)]
     #[must_use]
     pub fn new(
         rule_id: impl Into<String>,
