@@ -1,15 +1,9 @@
 # CodeRoughcollie 示例配置
 # 复制为 .roughcollie.toml 并根据实际情况修改
 
-[project]
-name = "my-gauss-app"
-root = "."
-git_repo = "."
-project_type = "mixed"
-baseline = "main"
+# === 数据库定义（命名 map，可多个）===
 
-# === 数据库预置连接（可选，启用后支持真实 EXPLAIN）===
-[database]
+[databases.gaussdb-prod]
 enabled = false
 host = "10.0.1.100"
 port = 5432
@@ -19,7 +13,7 @@ password_env = "GAUSSDB_PASSWORD"
 ssl_mode = "verify-full"
 auth_method = "sha256"
 
-[database.explain]
+[databases.gaussdb-prod.explain]
 timeout_seconds = 30
 max_cost_warning = 10000
 max_cost_critical = 50000
@@ -27,11 +21,26 @@ buffers_threshold = 100000
 enable_analyze = true
 enable_buffers = true
 
-[database.security]
+[databases.gaussdb-prod.security]
 enforce_readonly = true
 allowed_commands = ["EXPLAIN", "SET", "SHOW"]
 
-# === 审核规则 ===
+# === 项目定义（命名 map，引用数据库）===
+
+[projects.order-service]
+project_type = "gaussdb-sql"
+baseline = "main"
+git_repo = "."
+database = "gaussdb-prod"
+
+[projects.payment-service]
+project_type = "java"
+baseline = "dev"
+git_repo = "."
+database = "gaussdb-prod"
+
+# === 全局配置 ===
+
 [rules.ogexplain]
 preset = "all"
 
