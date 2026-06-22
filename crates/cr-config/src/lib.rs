@@ -1,39 +1,39 @@
 //! `.roughcollie.toml` 配置解析。
 
+use std::collections::BTreeMap;
 use std::path::Path;
 
 use serde::Deserialize;
 
 /// 根配置，对应 `.roughcollie.toml` 文件。
 #[derive(Debug, Clone, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
 #[non_exhaustive]
 pub struct Config {
-    /// `[project]` 段。
+    /// `[databases.*]` 段，命名 map。
     #[serde(default)]
-    pub project: ProjectConfig,
-    /// `[database]` 段。
+    pub databases: BTreeMap<String, DatabaseConfig>,
+    /// `[projects.*]` 段，命名 map。
     #[serde(default)]
-    pub database: DatabaseConfig,
-    /// `[rules]` 段。
+    pub projects: BTreeMap<String, ProjectConfig>,
+    /// `[rules]` 段（全局）。
     #[serde(default)]
     pub rules: RulesConfig,
-    /// `[output]` 段。
+    /// `[output]` 段（全局）。
     #[serde(default)]
     pub output: OutputConfig,
-    /// `[notifications]` 段（四期）。
+    /// `[notifications]` 段（四期，全局）。
     #[serde(default)]
     pub notifications: NotificationsConfig,
-    /// `[plugins]` 段（三期）。
+    /// `[plugins]` 段（三期，全局）。
     #[serde(default)]
     pub plugins: PluginsConfig,
 }
 
-/// `[project]` 段。
+/// `[projects.*]` 段。
 #[derive(Debug, Clone, Deserialize, Default)]
 #[non_exhaustive]
 pub struct ProjectConfig {
-    /// 项目名称。
-    pub name: Option<String>,
     /// 项目根目录（reserved，未来作为文件发现基准路径）。
     pub root: Option<String>,
     /// Git 版本库目录（git 操作工作目录），缺省为 CWD。
@@ -42,6 +42,8 @@ pub struct ProjectConfig {
     pub project_type: Option<ProjectType>,
     /// 默认 baseline 分支名，作为 `--baseline` CLI 参数的缺省值。
     pub baseline: Option<String>,
+    /// 引用的数据库名称（`[databases.*]` 的 key），`None` 为纯静态审核。
+    pub database: Option<String>,
 }
 
 /// 项目类型，驱动审核策略。
@@ -285,6 +287,23 @@ impl Config {
             .map_err(|e| ConfigError::ReadFailed(path.display().to_string(), e.to_string()))?;
         toml::from_str(&content).map_err(ConfigError::Parse)
     }
+
+    /// 校验配置完整性：检查项目引用的数据库是否存在。
+    ///
+    /// # Errors
+    ///
+    /// 当项目引用了不存在的数据库时返回错误。
+    pub fn validate(&self) -> Result<(), ConfigError> {
+        for (name, project) in &self.projects {
+            if let Some(db_ref) = &project.database {
+                if !self.databases.contains_key(db_ref) {
+                    let available: Vec<&str> = self.databases.keys().map(String::as_str).collect();
+                    return Err(ConfigError::InvalidDatabaseRef(name.clone(), db_ref.clone(), available.join(", ")));
+                }
+            }
+        }
+        Ok(())
+    }
 }
 
 /// 配置错误。
@@ -297,6 +316,9 @@ pub enum ConfigError {
     /// TOML 解析失败。
     #[error("配置解析失败: {0}")]
     Parse(#[from] toml::de::Error),
+    /// 项目引用了不存在的数据库。
+    #[error("项目 '{0}' 引用了不存在的数据库 '{1}'。可用数据库: {2}")]
+    InvalidDatabaseRef(String, String, String),
 }
 
 // --- 默认值函数 ---
@@ -425,46 +447,19 @@ mod tests {
     #[test]
     fn test_config_default() {
         let config = Config::default();
-        assert!(config.project.name.is_none());
-        assert!(config.project.root.is_none());
-        assert!(config.project.git_repo.is_none());
-        assert!(config.project.project_type.is_none());
-        assert!(config.project.baseline.is_none());
-        assert!(!config.database.enabled);
-        // serde(default = "default_port") only applies during deserialization, not Default::default()
-        assert_eq!(config.database.port, 0);
-        // serde(default = "default_ssl_mode") — Default gives ""
-        assert_eq!(config.database.ssl_mode, "");
-        // serde(default = "default_auth_method") — Default gives ""
-        assert_eq!(config.database.auth_method, "");
-        // ExplainConfig has a manual Default impl
-        assert_eq!(config.database.explain.timeout_seconds, 30);
-        assert_eq!(config.database.explain.max_cost_warning, 10_000.0);
-        assert_eq!(config.database.explain.max_cost_critical, 50_000.0);
-
-        assert_eq!(config.database.security.enforce_readonly, true);
-        assert_eq!(
-            config.database.security.allowed_commands,
-            vec!["EXPLAIN".to_string(), "SET".to_string(), "SHOW".to_string()]
-        );
-
+        assert!(config.projects.is_empty());
+        assert!(config.databases.is_empty());
         assert_eq!(config.output.format, "markdown");
         assert!(config.output.path.is_none());
         assert_eq!(config.output.exit_code_on_critical, 1);
-
         assert!(!config.notifications.enabled);
         assert!(config.plugins.paths.is_empty());
-        assert!(config.plugins.enabled.is_empty());
     }
 
     #[test]
     fn test_config_load_from_file() {
         let toml_content = r##"
-[project]
-name = "test-project"
-root = "/tmp/test"
-
-[database]
+[databases.testdb]
 enabled = true
 host = "localhost"
 port = 15432
@@ -474,7 +469,7 @@ password_env = "DB_PASS"
 ssl_mode = "disable"
 auth_method = "md5"
 
-[database.explain]
+[databases.testdb.explain]
 timeout_seconds = 60
 max_cost_warning = 5000.0
 max_cost_critical = 20000.0
@@ -482,9 +477,15 @@ buffers_threshold = 50000
 enable_analyze = false
 enable_buffers = false
 
-[database.security]
+[databases.testdb.security]
 enforce_readonly = false
 allowed_commands = ["EXPLAIN"]
+
+[projects.test-project]
+git_repo = "/tmp/test"
+project_type = "mixed"
+baseline = "main"
+database = "testdb"
 
 [rules.ogexplain]
 preset = "strict"
@@ -517,22 +518,26 @@ disabled = ["old-plugin"]
         std::fs::write(&path, toml_content).unwrap();
 
         let config = Config::load_from_file(&path).unwrap();
-        assert_eq!(config.project.name.unwrap(), "test-project");
-        assert_eq!(config.database.port, 15432);
-        assert_eq!(config.database.explain.timeout_seconds, 60);
-        assert!(!config.database.security.enforce_readonly);
+        let db = config.databases.get("testdb").unwrap();
+        assert_eq!(db.port, 15432);
+        assert_eq!(db.explain.timeout_seconds, 60);
+        assert!(!db.security.enforce_readonly);
         assert_eq!(config.output.format, "json");
         assert_eq!(config.notifications.slack.unwrap().channel, "#reviews");
+
+        let project = config.projects.get("test-project").unwrap();
+        assert_eq!(project.git_repo.as_deref(), Some("/tmp/test"));
+        assert_eq!(project.database.as_deref(), Some("testdb"));
 
         let _ = std::fs::remove_file(&path);
     }
 
     #[test]
     fn test_project_type_deserialize() {
-        fn project_type_from(toml: &str) -> ProjectType {
-            let wrapped = format!("[project]\nproject_type = {toml}\n");
+        fn project_type_from(toml_val: &str) -> ProjectType {
+            let wrapped = format!("[projects.test]\nproject_type = {toml_val}\n");
             let config: Config = toml::from_str(&wrapped).unwrap();
-            config.project.project_type.unwrap()
+            config.projects.get("test").unwrap().project_type.unwrap()
         }
         assert_eq!(project_type_from("\"gaussdb-sql\""), ProjectType::GaussdbSql);
         assert_eq!(project_type_from("\"java\""), ProjectType::Java);
@@ -541,7 +546,7 @@ disabled = ["old-plugin"]
 
     #[test]
     fn test_project_type_invalid_value() {
-        let toml_content = "[project]\nproject_type = \"python\"\n";
+        let toml_content = "[projects.test]\nproject_type = \"python\"\n";
         let result: Result<Config, _> = toml::from_str(toml_content);
         assert!(result.is_err());
     }
@@ -549,19 +554,86 @@ disabled = ["old-plugin"]
     #[test]
     fn test_config_project_fields_load() {
         let toml_content = r##"
-[project]
-name = "audit-demo"
+[projects.audit-demo]
 root = "."
 git_repo = "/srv/repos/audit-demo"
 project_type = "gaussdb-sql"
 baseline = "release-v2"
 "##;
         let config: Config = toml::from_str(toml_content).unwrap();
-        assert_eq!(config.project.name.as_deref(), Some("audit-demo"));
-        assert_eq!(config.project.root.as_deref(), Some("."));
-        assert_eq!(config.project.git_repo.as_deref(), Some("/srv/repos/audit-demo"));
-        assert_eq!(config.project.project_type, Some(ProjectType::GaussdbSql));
-        assert_eq!(config.project.baseline.as_deref(), Some("release-v2"));
+        let project = config.projects.get("audit-demo").unwrap();
+        assert_eq!(project.root.as_deref(), Some("."));
+        assert_eq!(project.git_repo.as_deref(), Some("/srv/repos/audit-demo"));
+        assert_eq!(project.project_type, Some(ProjectType::GaussdbSql));
+        assert_eq!(project.baseline.as_deref(), Some("release-v2"));
+        assert!(project.database.is_none());
+    }
+
+    #[test]
+    fn test_config_validate_valid_ref() {
+        let toml_content = r##"
+[databases.prod]
+host = "10.0.1.100"
+
+[projects.a]
+database = "prod"
+
+[projects.b]
+database = "prod"
+"##;
+        let config: Config = toml::from_str(toml_content).unwrap();
+        assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    fn test_config_validate_invalid_ref() {
+        let toml_content = r##"
+[databases.prod]
+host = "10.0.1.100"
+
+[projects.a]
+database = "nonexistent"
+"##;
+        let config: Config = toml::from_str(toml_content).unwrap();
+        let result = config.validate();
+        assert!(result.is_err());
+        match result {
+            Err(ConfigError::InvalidDatabaseRef(project, db, _)) => {
+                assert_eq!(project, "a");
+                assert_eq!(db, "nonexistent");
+            }
+            _ => panic!("Expected InvalidDatabaseRef error"),
+        }
+    }
+
+    #[test]
+    fn test_config_validate_no_database_ref() {
+        let toml_content = r##"
+[projects.static-only]
+project_type = "gaussdb-sql"
+"##;
+        let config: Config = toml::from_str(toml_content).unwrap();
+        assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    fn test_config_reject_old_format() {
+        let toml_content = r##"
+[project]
+name = "old-style"
+"##;
+        let result: Result<Config, _> = toml::from_str(toml_content);
+        assert!(result.is_err(), "old [project] format should be rejected");
+    }
+
+    #[test]
+    fn test_config_reject_old_database_format() {
+        let toml_content = r##"
+[database]
+host = "localhost"
+"##;
+        let result: Result<Config, _> = toml::from_str(toml_content);
+        assert!(result.is_err(), "old [database] format should be rejected");
     }
 
     #[test]
