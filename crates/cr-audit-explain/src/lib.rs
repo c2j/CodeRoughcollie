@@ -167,24 +167,24 @@ mod tests {
 
     #[test]
     fn test_analyze_empty_input() {
-        assert!(analyze_explain_text("").is_err());
+        assert!(analyze_explain_text("", "test").is_err());
     }
 
     #[test]
     fn test_analyze_invalid_text_doesnt_panic() {
-        let _ = analyze_explain_text("not explain output");
+        let _ = analyze_explain_text("not explain output", "test");
     }
 
     #[test]
     fn test_analyze_simple_seq_scan_doesnt_panic() {
         let explain = "Seq Scan on public.users  (cost=0.00..154.00 rows=5400 width=4)";
-        let _ = analyze_explain_text(explain);
+        let _ = analyze_explain_text(explain, "test");
     }
 
     #[test]
     fn test_analyze_with_config_no_disabled() {
         let explain = "Seq Scan on public.users  (cost=0.00..154.00 rows=5400 width=4)";
-        let result = analyze_explain_with_config(explain, &[]);
+        let result = analyze_explain_with_config(explain, "test", &[]);
         assert!(result.is_ok());
     }
 
@@ -194,20 +194,20 @@ mod tests {
 Seq Scan on public.orders  (cost=0.00..48231.50 rows=5000000 width=244)
   Filter: (create_time > '2024-01-01 00:00:00'::timestamp without time zone)
   Rows Removed by Filter: 4990000";
-        let result = analyze_explain_text(explain);
+        let result = analyze_explain_text(explain, "test");
         assert!(result.is_ok());
     }
 
     #[test]
     fn test_disabled_rules_empty_result() {
         let explain = "Seq Scan on public.users  (cost=0.00..154.00 rows=5400 width=4)";
-        let result = analyze_explain_with_config(explain, &["SCAN-001".into(), "SCAN-004".into()]);
+        let result = analyze_explain_with_config(explain, "test", &["SCAN-001".into(), "SCAN-004".into()]);
         assert!(result.is_ok());
     }
 
     #[test]
     fn test_parse_error_returns_error() {
-        let result = analyze_explain_text("");
+        let result = analyze_explain_text("", "test");
         assert!(result.is_err());
     }
 }
