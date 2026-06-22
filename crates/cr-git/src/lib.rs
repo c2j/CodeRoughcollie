@@ -1,7 +1,71 @@
 //! Git diff 解析、baseline 对比。
 
+use std::collections::BTreeSet;
 use std::path::PathBuf;
 use std::process::Command;
+
+/// Supported file extensions for the audit pipeline.
+///
+/// MUST stay in sync with the per-language extension lists in
+/// `cr-audit-static/src/file_type.rs`. Used by [`walk_directory`] as a cheap
+/// pre-filter so we don't read every file in `target/` or `node_modules/`.
+pub const SUPPORTED_EXTENSIONS: &[&str] = &["sql", "prc", "pck", "pkb", "fnc", "java", "xml"];
+
+/// Recursively walk one or more directories, returning candidate files whose
+/// extensions match [`SUPPORTED_EXTENSIONS`].
+///
+/// Uses the `ignore` crate which respects `.gitignore`, `.ignore`, and parent
+/// `.git` directory boundaries by default. Hidden files (dotfiles) are skipped
+/// by default. Symlinks are not followed.
+///
+/// # Errors
+///
+/// Returns `std::io::Error` if a provided path does not exist or is neither a
+/// file nor a directory.
+///
+/// # Examples
+///
+/// ```no_run
+/// use std::path::PathBuf;
+/// let files = cr_git::walk_directory(&[PathBuf::from("src/")]).unwrap();
+/// ```
+pub fn walk_directory(dirs: &[PathBuf]) -> Result<Vec<PathBuf>, std::io::Error> {
+    let mut files = BTreeSet::new();
+
+    for dir in dirs {
+        if !dir.exists() {
+            return Err(std::io::Error::other(format!("目录不存在: {}", dir.display())));
+        }
+
+        let walker = ignore::WalkBuilder::new(dir).standard_filters(true).build();
+
+        for entry in walker {
+            let entry = match entry {
+                Err(err) => {
+                    tracing::warn!(error = %err, "遍历文件时出错");
+                    continue;
+                }
+                Ok(e) => e,
+            };
+
+            let Some(file_type) = entry.file_type() else {
+                continue;
+            };
+            if !file_type.is_file() {
+                continue;
+            }
+
+            let ext =
+                entry.path().extension().and_then(|e| e.to_str()).map(|e| e.to_ascii_lowercase()).unwrap_or_default();
+
+            if SUPPORTED_EXTENSIONS.contains(&ext.as_str()) {
+                files.insert(entry.path().to_path_buf());
+            }
+        }
+    }
+
+    Ok(files.into_iter().collect())
+}
 
 /// 变更文件信息。
 #[derive(Debug, Clone)]
@@ -53,10 +117,16 @@ impl ChangedFile {
         self.extension() == Some("sql")
     }
 
-    /// 是否为 XML 文件（MyBatis Mapper）。
+    /// 是否为 XML 文件（仅按扩展名判断，内容由审核层校验）。
     #[must_use]
-    pub fn is_mybatis_xml(&self) -> bool {
+    pub fn is_xml(&self) -> bool {
         self.extension() == Some("xml")
+    }
+
+    /// 是否为 Java 源文件（仅按扩展名判断）。
+    #[must_use]
+    pub fn is_java(&self) -> bool {
+        self.extension() == Some("java")
     }
 }
 
@@ -140,13 +210,13 @@ mod tests {
     fn test_is_sql() {
         let file = ChangedFile::from_diff_line("A\tquery.sql").unwrap();
         assert!(file.is_sql());
-        assert!(!file.is_mybatis_xml());
+        assert!(!file.is_xml());
     }
 
     #[test]
-    fn test_is_mybatis_xml() {
+    fn test_is_xml() {
         let file = ChangedFile::from_diff_line("M\tUserMapper.xml").unwrap();
-        assert!(file.is_mybatis_xml());
+        assert!(file.is_xml());
         assert!(!file.is_sql());
     }
 
@@ -154,7 +224,18 @@ mod tests {
     fn test_is_neither_sql_nor_xml() {
         let file = ChangedFile::from_diff_line("A\tREADME.md").unwrap();
         assert!(!file.is_sql());
-        assert!(!file.is_mybatis_xml());
+        assert!(!file.is_xml());
+    }
+
+    #[test]
+    fn test_is_java() {
+        let file = ChangedFile::from_diff_line("A\tFoo.java").unwrap();
+        assert!(file.is_java());
+        assert!(!file.is_sql());
+        assert!(!file.is_xml());
+
+        let non_java = ChangedFile::from_diff_line("A\tREADME.md").unwrap();
+        assert!(!non_java.is_java());
     }
 
     #[test]
@@ -167,5 +248,79 @@ mod tests {
     fn test_extension_no_extension() {
         let file = ChangedFile::from_diff_line("A\tDockerfile").unwrap();
         assert_eq!(file.extension(), None);
+    }
+
+    // ── walk_directory tests ──────────────────────────────────
+
+    #[test]
+    fn test_walk_directory_finds_supported_files() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("a.sql"), "").unwrap();
+        std::fs::write(dir.path().join("b.java"), "").unwrap();
+        std::fs::write(dir.path().join("c.xml"), "").unwrap();
+        std::fs::write(dir.path().join("d.txt"), "").unwrap();
+
+        let files = walk_directory(&[dir.path().to_path_buf()]).unwrap();
+        assert_eq!(files.len(), 3);
+        assert!(files.contains(&dir.path().join("a.sql")));
+        assert!(files.contains(&dir.path().join("b.java")));
+        assert!(files.contains(&dir.path().join("c.xml")));
+        assert!(!files.contains(&dir.path().join("d.txt")));
+    }
+
+    #[test]
+    fn test_walk_directory_recursive() {
+        let dir = tempfile::tempdir().unwrap();
+        let sub = dir.path().join("subdir");
+        std::fs::create_dir(&sub).unwrap();
+        std::fs::write(sub.join("x.sql"), "").unwrap();
+
+        let files = walk_directory(&[dir.path().to_path_buf()]).unwrap();
+        assert!(files.contains(&sub.join("x.sql")));
+    }
+
+    #[test]
+    fn test_walk_directory_respects_gitignore() {
+        let dir = tempfile::tempdir().unwrap();
+        // Use .ignore (not .gitignore) for reliability — ignore crate reads both.
+        std::fs::write(dir.path().join(".ignore"), "*.txt").unwrap();
+        std::fs::write(dir.path().join("keep.sql"), "").unwrap();
+        std::fs::write(dir.path().join("ignore.txt"), "").unwrap();
+
+        let files = walk_directory(&[dir.path().to_path_buf()]).unwrap();
+        assert_eq!(files.len(), 1);
+        assert!(files.contains(&dir.path().join("keep.sql")));
+    }
+
+    #[test]
+    fn test_walk_directory_dedup() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("a.sql"), "").unwrap();
+
+        let files = walk_directory(&[dir.path().to_path_buf(), dir.path().to_path_buf()]).unwrap();
+        assert_eq!(files.len(), 1);
+    }
+
+    #[test]
+    fn test_walk_directory_nonexistent_path() {
+        let result = walk_directory(&[PathBuf::from("/tmp/__nonexistent_cr_test_dir__")]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_walk_directory_sql_family_extensions() {
+        let dir = tempfile::tempdir().unwrap();
+        for ext in &["sql", "prc", "pck", "pkb", "fnc", "java", "xml"] {
+            std::fs::write(dir.path().join(format!("test.{ext}")), "").unwrap();
+        }
+
+        let files = walk_directory(&[dir.path().to_path_buf()]).unwrap();
+        assert_eq!(files.len(), 7);
+    }
+
+    #[test]
+    fn test_walk_directory_empty_dirs() {
+        let files = walk_directory(&[]).unwrap();
+        assert!(files.is_empty());
     }
 }
