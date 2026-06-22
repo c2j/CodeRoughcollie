@@ -24,6 +24,10 @@ enum Commands {
         #[arg(long, value_delimiter = ',')]
         files: Vec<PathBuf>,
 
+        /// 待审核目录列表（逗号分隔，递归遍历，尊重 .gitignore）。
+        #[arg(long, value_delimiter = ',')]
+        dir: Vec<PathBuf>,
+
         /// 输出格式：markdown / json / sarif / csv。
         #[arg(long, default_value = "markdown")]
         output_format: String,
@@ -68,6 +72,7 @@ fn main() {
         Commands::Audit {
             baseline,
             files,
+            dir,
             output_format,
             output_path,
             no_db,
@@ -78,6 +83,7 @@ fn main() {
         } => run_audit(
             &baseline,
             &files,
+            &dir,
             &output_format,
             output_path.as_deref(),
             no_db,
@@ -124,9 +130,11 @@ fn read_file_with_encoding(path: &std::path::Path) -> std::io::Result<String> {
     Ok(String::from_utf8_lossy(&bytes).into_owned())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn run_audit(
     baseline: &str,
     files: &[PathBuf],
+    dirs: &[PathBuf],
     output_format: &str,
     output_path: Option<&std::path::Path>,
     no_db: bool,
@@ -137,24 +145,38 @@ fn run_audit(
 ) {
     let config = load_config();
 
-    let audit_files = if files.is_empty() {
-        match cr_git::changed_files(baseline) {
-            Ok(f) => {
-                f.into_iter().filter(|cf| cf.is_sql() || cf.is_mybatis_xml()).map(|cf| cf.path).collect::<Vec<_>>()
+    let user_explicit_sources = !files.is_empty() || !dirs.is_empty();
+    let mut audit_files: Vec<PathBuf> = Vec::new();
+    if !files.is_empty() {
+        audit_files.extend(files.iter().cloned());
+    }
+    if !dirs.is_empty() {
+        match cr_git::walk_directory(dirs) {
+            Ok(walked) => audit_files.extend(walked),
+            Err(e) => {
+                tracing::error!(error = %e, "目录遍历失败");
+                std::process::exit(2);
             }
+        }
+    }
+    // Dedup + sort for stable output
+    audit_files.sort();
+    audit_files.dedup();
+    // Fallback: only when user passed neither --files nor --dir, use git diff
+    if !user_explicit_sources {
+        audit_files = match cr_git::changed_files(baseline) {
+            Ok(f) => f.into_iter().filter(|cf| cf.is_sql() || cf.is_xml() || cf.is_java()).map(|cf| cf.path).collect(),
             Err(e) => {
                 tracing::error!(error = %e, "获取变更文件失败");
                 std::process::exit(2);
             }
-        }
-    } else {
-        files.to_vec()
-    };
+        };
+    }
 
     tracing::info!(file_count = audit_files.len(), "开始审核");
 
     let rt = tokio::runtime::Runtime::new().expect("创建 tokio 运行时失败");
-    let (all_findings, degraded) = rt.block_on(audit_all_files(
+    let (all_findings, degraded, skipped) = rt.block_on(audit_all_files(
         &audit_files,
         &config,
         no_db,
@@ -170,7 +192,8 @@ fn run_audit(
     let hs = cr_core::scoring::health_score(&all_findings);
     let hg = cr_core::scoring::HealthGrade::from_score(hs);
 
-    let ctx = cr_report::RenderContext::new(all_findings, severity_counts, hs, hg, baseline.to_string(), degraded);
+    let ctx = cr_report::RenderContext::new(all_findings, severity_counts, hs, hg, baseline.to_string(), degraded)
+        .with_skipped_files(skipped);
 
     let report = cr_report::render(&ctx, format);
 
@@ -186,6 +209,7 @@ fn run_audit(
         critical = ctx.severity_counts.critical,
         warning = ctx.severity_counts.warning,
         info = ctx.severity_counts.info,
+        skipped = ctx.skipped_files.len(),
         health_score = ctx.health_score,
         "审核完成"
     );
@@ -213,6 +237,7 @@ fn load_config() -> cr_config::Config {
     }
 }
 
+/// 审核所有文件，返回（发现列表，是否降级，跳过的文件列表）。
 async fn audit_all_files(
     files: &[PathBuf],
     config: &cr_config::Config,
@@ -221,9 +246,10 @@ async fn audit_all_files(
     db_name: Option<&str>,
     db_user: Option<&str>,
     db_password_env: Option<&str>,
-) -> (Vec<cr_core::Finding>, bool) {
+) -> (Vec<cr_core::Finding>, bool, Vec<String>) {
     let mut all_findings = Vec::new();
     let mut degraded = false;
+    let mut skipped: Vec<String> = Vec::new();
 
     let db_enabled = config.database.enabled && !no_db;
     let db_conn = if db_enabled {
@@ -261,20 +287,29 @@ async fn audit_all_files(
         };
 
         let file_path_str = file_path.to_string_lossy().to_string();
-        let ext = file_path.extension().and_then(|e| e.to_str()).unwrap_or("");
-        let mut findings = match ext {
-            "sql" => audit_sql_file(&content, &file_path_str, &db_conn, config).await,
-            "xml" => {
-                tracing::debug!(path = %file_path.display(), "MyBatis XML 安全扫描中");
-                cr_audit_static::java_security::audit_mybatis_xml(&content, &file_path_str)
+        let kind = cr_audit_static::detect(file_path, &content);
+        let mut findings = match kind {
+            cr_audit_static::FileKind::Sql => {
+                tracing::debug!(path = %file_path.display(), "SQL 审核中");
+                audit_sql_file(&content, &file_path_str, &db_conn, config).await
             }
-            "java" => {
+            cr_audit_static::FileKind::Java => {
                 tracing::debug!(path = %file_path.display(), "Java 安全扫描中");
                 cr_audit_static::java_security::audit_java_source(&content, &file_path_str)
             }
+            cr_audit_static::FileKind::MyBatisXml => {
+                tracing::debug!(path = %file_path.display(), "MyBatis XML 安全扫描中");
+                cr_audit_static::java_security::audit_mybatis_xml(&content, &file_path_str)
+            }
+            cr_audit_static::FileKind::Unsupported => {
+                tracing::warn!(path = %file_path.display(), "不支持审核此文件类型，已跳过");
+                skipped.push(file_path_str.clone());
+                continue;
+            }
             _ => {
-                tracing::debug!(path = %file_path.display(), ext = ext, "未知文件类型，尝试 SQL 审核");
-                audit_sql_file(&content, &file_path_str, &db_conn, config).await
+                tracing::warn!(path = %file_path.display(), "未知文件类型，已跳过");
+                skipped.push(file_path_str.clone());
+                continue;
             }
         };
 
@@ -286,7 +321,7 @@ async fn audit_all_files(
         all_findings.append(&mut findings);
     }
 
-    (all_findings, degraded)
+    (all_findings, degraded, skipped)
 }
 
 async fn audit_sql_file(
