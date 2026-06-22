@@ -346,34 +346,30 @@ pub fn render_csv(findings: &[Finding]) -> String {
     for f in findings {
         push_csv_field(&mut out, &f.file_path);
         out.push(',');
-        match f.node_line {
-            Some(line) => out.push_str(&line.to_string()),
-            None => {}
+        if let Some(line) = f.node_line {
+            out.push_str(&line.to_string());
         }
         out.push(',');
         push_csv_field(&mut out, &f.rule_id);
         out.push(',');
         push_csv_field(&mut out, f.severity.as_str());
         out.push(',');
-        push_csv_field(&mut out, &format_category(f.category));
+        push_csv_field(&mut out, format_category(f.category));
         out.push(',');
         push_csv_field(&mut out, &f.title);
         out.push(',');
         push_csv_field(&mut out, &f.detail);
         out.push(',');
-        match &f.node_type {
-            Some(nt) => push_csv_field(&mut out, nt),
-            None => {}
+        if let Some(nt) = &f.node_type {
+            push_csv_field(&mut out, nt);
         }
         out.push(',');
-        match &f.suggestion {
-            Some(s) => push_csv_field(&mut out, s),
-            None => {}
+        if let Some(s) = &f.suggestion {
+            push_csv_field(&mut out, s);
         }
         out.push(',');
-        match &f.code_snippet {
-            Some(s) => push_csv_field(&mut out, s),
-            None => {}
+        if let Some(s) = &f.code_snippet {
+            push_csv_field(&mut out, s);
         }
         out.push('\n');
     }
