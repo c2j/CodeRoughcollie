@@ -10,7 +10,7 @@
 //!
 //! let sql = "SELECT * FROM t1 JOIN t2 ON t1.id = t2.id";
 //! let score = get_complexity_score(sql).unwrap();
-//! let findings = audit_complexity(sql, None, 10.0, 20.0);
+//! let findings = audit_complexity(sql, "test.sql", None, 10.0, 20.0);
 //! ```
 
 /// 复杂度等级。

@@ -377,6 +377,191 @@ pub fn render_csv(findings: &[Finding]) -> String {
     out
 }
 
+// ── 多项目报告 ──
+
+/// 单个项目的报告段。
+#[derive(Debug, Clone)]
+pub struct ProjectSection {
+    /// 项目名称（map key）。
+    pub name: String,
+    /// 该项目的渲染上下文。
+    pub ctx: RenderContext,
+}
+
+/// 多项目报告上下文，包含多个项目的审核结果。
+#[derive(Debug, Clone)]
+pub struct MultiProjectContext {
+    /// 按项目排列的报告段。
+    pub sections: Vec<ProjectSection>,
+}
+
+/// 渲染多项目报告。
+#[must_use]
+pub fn render_multi(ctx: &MultiProjectContext, format: ReportFormat) -> String {
+    match format {
+        ReportFormat::Markdown => render_multi_markdown(ctx),
+        ReportFormat::Json => render_multi_json(ctx),
+        ReportFormat::Sarif => render_multi_sarif(ctx),
+        ReportFormat::Csv => render_multi_csv(ctx),
+    }
+}
+
+fn render_multi_markdown(ctx: &MultiProjectContext) -> String {
+    let mut out = String::with_capacity(8192);
+    out.push_str("# CodeRoughcollie 多项目审核报告\n\n");
+
+    // ── 总览表 ──
+    out.push_str("## 总览\n\n");
+    out.push_str("| 项目 | 🔴 Critical | 🟡 Warning | 🔵 Info | 健康度 |\n");
+    out.push_str("|------|------------|----------|---------|--------|\n");
+    for section in &ctx.sections {
+        let c = section.ctx.severity_counts.critical;
+        let w = section.ctx.severity_counts.warning;
+        let i = section.ctx.severity_counts.info;
+        let score = section.ctx.health_score as u8;
+        let grade = section.ctx.health_grade.as_str();
+        out.push_str(&format!("| {} | {} | {} | {} | {} ({}) |\n", section.name, c, w, i, score, grade));
+    }
+    out.push('\n');
+
+    // ── 各项目明细 ──
+    for section in &ctx.sections {
+        out.push_str(&format!("---\n\n# 项目: {}\n\n", section.name));
+        render_summary(&mut out, &section.ctx);
+        render_skipped_files(&mut out, &section.ctx);
+        if section.ctx.degraded {
+            out.push_str("> ⚠️ **EXPLAIN 降级**：数据库连接不可用，已自动回退为静态分析。\n\n");
+        }
+        if !section.ctx.findings.is_empty() {
+            render_file_details(&mut out, &section.ctx.findings);
+            render_rule_stats(&mut out, &section.ctx.findings);
+        } else {
+            out.push_str("✅ **审核通过，未发现问题。**\n\n");
+        }
+    }
+
+    out
+}
+
+fn render_multi_json(ctx: &MultiProjectContext) -> String {
+    let projects: Vec<serde_json::Value> = ctx
+        .sections
+        .iter()
+        .map(|s| {
+            serde_json::json!({
+                "name": s.name,
+                "findings": s.ctx.findings,
+                "skipped_files": s.ctx.skipped_files,
+            })
+        })
+        .collect();
+
+    let total_critical: usize = ctx.sections.iter().map(|s| s.ctx.severity_counts.critical).sum();
+    let total_warning: usize = ctx.sections.iter().map(|s| s.ctx.severity_counts.warning).sum();
+    let total_info: usize = ctx.sections.iter().map(|s| s.ctx.severity_counts.info).sum();
+
+    let output = serde_json::json!({
+        "projects": projects,
+        "summary": {
+            "project_count": ctx.sections.len(),
+            "total_critical": total_critical,
+            "total_warning": total_warning,
+            "total_info": total_info,
+        }
+    });
+    serde_json::to_string_pretty(&output).unwrap_or_else(|e| format!("{{\"error\": \"{e}\"}}"))
+}
+
+fn render_multi_sarif(ctx: &MultiProjectContext) -> String {
+    let runs: Vec<serde_json::Value> = ctx
+        .sections
+        .iter()
+        .map(|s| {
+            let results: Vec<serde_json::Value> = s
+                .ctx
+                .findings
+                .iter()
+                .map(|f| {
+                    serde_json::json!({
+                        "ruleId": f.rule_id,
+                        "level": match f.severity {
+                            cr_core::Severity::Critical => "error",
+                            cr_core::Severity::Warning => "warning",
+                            _ => "note",
+                        },
+                        "message": { "text": &f.detail },
+                        "locations": [{
+                            "physicalLocation": {
+                                "artifactLocation": { "uri": &f.file_path },
+                                "region": f.node_line.map(|l| serde_json::json!({ "startLine": l }))
+                            }
+                        }]
+                    })
+                })
+                .collect();
+            serde_json::json!({
+                "tool": {
+                    "driver": {
+                        "name": "CodeRoughcollie",
+                        "version": env!("CARGO_PKG_VERSION")
+                    }
+                },
+                "properties": { "project": &s.name },
+                "results": results
+            })
+        })
+        .collect();
+
+    let sarif = serde_json::json!({
+        "version": "2.1.0",
+        "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
+        "runs": runs
+    });
+    serde_json::to_string_pretty(&sarif).unwrap_or_else(|e| format!("{{\"error\": \"{e}\"}}"))
+}
+
+fn render_multi_csv(ctx: &MultiProjectContext) -> String {
+    let mut out = String::with_capacity(ctx.sections.len() * 256);
+    out.push_str("project,file,line,rule_id,severity,category,title,detail,node_type,suggestion,code_snippet\n");
+
+    for section in &ctx.sections {
+        for f in &section.ctx.findings {
+            push_csv_field(&mut out, &section.name);
+            out.push(',');
+            push_csv_field(&mut out, &f.file_path);
+            out.push(',');
+            if let Some(line) = f.node_line {
+                out.push_str(&line.to_string());
+            }
+            out.push(',');
+            push_csv_field(&mut out, &f.rule_id);
+            out.push(',');
+            push_csv_field(&mut out, f.severity.as_str());
+            out.push(',');
+            push_csv_field(&mut out, format_category(f.category));
+            out.push(',');
+            push_csv_field(&mut out, &f.title);
+            out.push(',');
+            push_csv_field(&mut out, &f.detail);
+            out.push(',');
+            if let Some(nt) = &f.node_type {
+                push_csv_field(&mut out, nt);
+            }
+            out.push(',');
+            if let Some(s) = &f.suggestion {
+                push_csv_field(&mut out, s);
+            }
+            out.push(',');
+            if let Some(s) = &f.code_snippet {
+                push_csv_field(&mut out, s);
+            }
+            out.push('\n');
+        }
+    }
+
+    out
+}
+
 fn format_category(c: cr_core::DiagnosticCategory) -> &'static str {
     match c {
         cr_core::DiagnosticCategory::ScanEfficiency => "ScanEfficiency",
@@ -690,5 +875,98 @@ mod tests {
         assert!(ReportFormat::parse("html").is_err());
         assert!(ReportFormat::parse("").is_err());
         assert!(ReportFormat::parse("pdf").is_err());
+    }
+
+    // ── 多项目报告测试 ──
+
+    fn sample_multi_ctx() -> MultiProjectContext {
+        let findings_a = vec![Finding::new(
+            "SCAN-001",
+            Severity::Critical,
+            DiagnosticCategory::ScanEfficiency,
+            "大表全表扫描",
+            "表 users 未使用索引",
+            "src/sql/query.sql",
+            None,
+            Some(3),
+            None,
+            None,
+        )];
+        let counts_a = cr_core::scoring::count_by_severity(&findings_a);
+        let hs_a = cr_core::scoring::health_score(&findings_a);
+        let hg_a = HealthGrade::from_score(hs_a);
+        let ctx_a = RenderContext::new(findings_a, counts_a, hs_a, hg_a, "main".into(), false);
+
+        let findings_b = vec![Finding::new(
+            "STATIC-SELECT-STAR",
+            Severity::Warning,
+            DiagnosticCategory::ScanEfficiency,
+            "SELECT *",
+            "避免 SELECT *",
+            "src/sql/orders.sql",
+            None,
+            Some(1),
+            None,
+            None,
+        )];
+        let counts_b = cr_core::scoring::count_by_severity(&findings_b);
+        let hs_b = cr_core::scoring::health_score(&findings_b);
+        let hg_b = HealthGrade::from_score(hs_b);
+        let ctx_b = RenderContext::new(findings_b, counts_b, hs_b, hg_b, "dev".into(), false);
+
+        MultiProjectContext {
+            sections: vec![
+                ProjectSection { name: "order-service".into(), ctx: ctx_a },
+                ProjectSection { name: "payment-service".into(), ctx: ctx_b },
+            ],
+        }
+    }
+
+    #[test]
+    fn test_render_multi_markdown() {
+        let ctx = sample_multi_ctx();
+        let output = render_multi(&ctx, ReportFormat::Markdown);
+        assert!(output.contains("多项目审核报告"));
+        assert!(output.contains("总览"));
+        assert!(output.contains("order-service"));
+        assert!(output.contains("payment-service"));
+        assert!(output.contains("项目: order-service"));
+        assert!(output.contains("SCAN-001"));
+        assert!(output.contains("STATIC-SELECT-STAR"));
+    }
+
+    #[test]
+    fn test_render_multi_json() {
+        let ctx = sample_multi_ctx();
+        let output = render_multi(&ctx, ReportFormat::Json);
+        let parsed: serde_json::Value = serde_json::from_str(&output).unwrap();
+        assert_eq!(parsed["projects"].as_array().unwrap().len(), 2);
+        assert_eq!(parsed["projects"][0]["name"], "order-service");
+        assert_eq!(parsed["summary"]["project_count"], 2);
+        assert_eq!(parsed["summary"]["total_critical"], 1);
+        assert_eq!(parsed["summary"]["total_warning"], 1);
+    }
+
+    #[test]
+    fn test_render_multi_csv() {
+        let ctx = sample_multi_ctx();
+        let output = render_multi(&ctx, ReportFormat::Csv);
+        let header = output.lines().next().unwrap();
+        assert!(header.starts_with("project,file,line"));
+        let data_lines: Vec<&str> = output.lines().skip(1).collect();
+        assert_eq!(data_lines.len(), 2);
+        assert!(data_lines[0].contains("order-service"));
+        assert!(data_lines[1].contains("payment-service"));
+    }
+
+    #[test]
+    fn test_render_multi_sarif() {
+        let ctx = sample_multi_ctx();
+        let output = render_multi(&ctx, ReportFormat::Sarif);
+        let parsed: serde_json::Value = serde_json::from_str(&output).unwrap();
+        let runs = parsed["runs"].as_array().unwrap();
+        assert_eq!(runs.len(), 2);
+        assert_eq!(runs[0]["properties"]["project"], "order-service");
+        assert_eq!(runs[1]["properties"]["project"], "payment-service");
     }
 }
