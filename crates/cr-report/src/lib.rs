@@ -59,6 +59,11 @@ pub struct RenderContext {
     pub branch: String,
     /// 是否发生降级。
     pub degraded: bool,
+    /// 跳过的文件（不支持的类型）。
+    ///
+    /// 这些文件因类型不受支持而未经过审核（例如 `pom.xml`）。
+    /// 此字段不影响 `health_score`，仅用于审计追溯。
+    pub skipped_files: Vec<String>,
 }
 
 impl RenderContext {
@@ -72,7 +77,17 @@ impl RenderContext {
         branch: String,
         degraded: bool,
     ) -> Self {
-        Self { findings, severity_counts, health_score, health_grade, branch, degraded }
+        Self { findings, severity_counts, health_score, health_grade, branch, degraded, skipped_files: Vec::new() }
+    }
+
+    /// 设置跳过的文件列表（构建器模式）。
+    ///
+    /// 设置后，将在报告中显示跳过计数和文件列表。
+    /// 不影响 `health_score`。
+    #[must_use]
+    pub fn with_skipped_files(mut self, files: Vec<String>) -> Self {
+        self.skipped_files = files;
+        self
     }
 }
 
@@ -81,7 +96,7 @@ impl RenderContext {
 pub fn render(ctx: &RenderContext, format: ReportFormat) -> String {
     match format {
         ReportFormat::Markdown => render_markdown(ctx),
-        ReportFormat::Json => render_json(&ctx.findings),
+        ReportFormat::Json => render_json(ctx),
         ReportFormat::Sarif => render_sarif(&ctx.findings),
         ReportFormat::Csv => render_csv(&ctx.findings),
     }
@@ -97,6 +112,9 @@ pub fn render_markdown(ctx: &RenderContext) -> String {
 
     // ── 执行摘要 ──
     render_summary(&mut out, ctx);
+
+    // ── 跳过文件报告 ──
+    render_skipped_files(&mut out, ctx);
 
     // ── 降级警告 ──
     if ctx.degraded {
@@ -141,7 +159,32 @@ fn render_summary(out: &mut String, ctx: &RenderContext) {
     } else {
         "✅ **通过** — 未发现问题"
     };
-    out.push_str(&format!("| 门禁结论 | {gate} |\n\n"));
+    out.push_str(&format!("| 门禁结论 | {gate} |\n"));
+    if !ctx.skipped_files.is_empty() {
+        out.push_str(&format!("| 跳过（不支持类型） | **{}** |\n", ctx.skipped_files.len()));
+    }
+    out.push('\n');
+}
+
+fn render_skipped_files(out: &mut String, ctx: &RenderContext) {
+    if ctx.skipped_files.is_empty() {
+        return;
+    }
+
+    out.push_str("### ⏭️ 跳过的文件（不支持类型）\n\n");
+
+    if ctx.skipped_files.len() > 10 {
+        for f in ctx.skipped_files.iter().take(10) {
+            out.push_str(&format!("- {f}\n"));
+        }
+        out.push_str(&format!("（共 {} 个，已省略其余）\n", ctx.skipped_files.len()));
+    } else {
+        for f in &ctx.skipped_files {
+            out.push_str(&format!("- {f}\n"));
+        }
+    }
+
+    out.push('\n');
 }
 
 fn render_file_details(out: &mut String, findings: &[Finding]) {
@@ -236,10 +279,16 @@ fn render_rule_stats(out: &mut String, findings: &[Finding]) {
     out.push('\n');
 }
 
-/// 将 Finding 列表渲染为 JSON 报告。
+/// 将审核上下文渲染为 JSON 报告。
+///
+/// 包含 `findings` 和 `skipped_files` 两个顶层字段。
 #[must_use]
-pub fn render_json(findings: &[Finding]) -> String {
-    serde_json::to_string_pretty(findings).unwrap_or_else(|e| format!("{{\"error\": \"{e}\"}}"))
+pub fn render_json(ctx: &RenderContext) -> String {
+    let output = serde_json::json!({
+        "findings": ctx.findings,
+        "skipped_files": ctx.skipped_files,
+    });
+    serde_json::to_string_pretty(&output).unwrap_or_else(|e| format!("{{\"error\": \"{e}\"}}"))
 }
 
 /// 将 Finding 列表渲染为 SARIF 报告（GitHub Advanced Security 兼容）。
@@ -458,19 +507,75 @@ mod tests {
     }
 
     #[test]
-    fn test_render_json_valid() {
-        let output = render_json(&sample_ctx().findings);
+    fn test_render_markdown_skipped_files_empty() {
+        // 空 skipped_files 不产生额外输出
+        let ctx =
+            RenderContext::new(vec![], SeverityCounts::default(), 100.0, HealthGrade::Excellent, "main".into(), false);
+        let output = render_markdown(&ctx);
+        assert!(output.contains("审核通过"));
+        assert!(!output.contains("跳过（不支持类型）"));
+        assert!(!output.contains("⏭️"));
+    }
+
+    #[test]
+    fn test_render_markdown_with_skipped_files() {
+        let ctx =
+            RenderContext::new(vec![], SeverityCounts::default(), 100.0, HealthGrade::Excellent, "main".into(), false)
+                .with_skipped_files(vec!["pom.xml".into(), "build.gradle".into()]);
+        let output = render_markdown(&ctx);
+        assert!(output.contains("跳过（不支持类型）"));
+        assert!(output.contains("**2**"));
+        assert!(output.contains("pom.xml"));
+        assert!(output.contains("build.gradle"));
+        assert!(output.contains("⏭️"));
+    }
+
+    #[test]
+    fn test_render_markdown_skipped_files_long_list() {
+        let files: Vec<String> = (1..=15).map(|i| format!("file{i}.xml")).collect();
+        let ctx =
+            RenderContext::new(vec![], SeverityCounts::default(), 100.0, HealthGrade::Excellent, "main".into(), false)
+                .with_skipped_files(files);
+        let output = render_markdown(&ctx);
+        assert!(output.contains("**15**"));
+        assert!(output.contains("共 15 个，已省略其余"));
+        // 只显示前 10 个文件
+        assert!(output.contains("file1.xml"));
+        assert!(output.contains("file10.xml"));
+        assert!(!output.contains("file11.xml"));
+    }
+
+    #[test]
+    fn test_render_json_skipped_files() {
+        let mut ctx = sample_ctx();
+        ctx.skipped_files = vec!["pom.xml".into()];
+        let output = render_json(&ctx);
         let parsed: serde_json::Value = serde_json::from_str(&output).unwrap();
-        assert!(parsed.is_array());
-        assert_eq!(parsed.as_array().unwrap().len(), 3);
+        assert!(parsed.is_object());
+        assert_eq!(parsed["findings"].as_array().unwrap().len(), 3);
+        assert_eq!(parsed["skipped_files"].as_array().unwrap().len(), 1);
+        assert_eq!(parsed["skipped_files"][0], "pom.xml");
+    }
+
+    #[test]
+    fn test_render_json_valid() {
+        let ctx = sample_ctx();
+        let output = render_json(&ctx);
+        let parsed: serde_json::Value = serde_json::from_str(&output).unwrap();
+        assert!(parsed.is_object());
+        assert_eq!(parsed["findings"].as_array().unwrap().len(), 3);
+        assert!(parsed["skipped_files"].as_array().unwrap().is_empty());
     }
 
     #[test]
     fn test_render_json_empty() {
-        let output = render_json(&[]);
+        let ctx =
+            RenderContext::new(vec![], SeverityCounts::default(), 100.0, HealthGrade::Excellent, "main".into(), false);
+        let output = render_json(&ctx);
         let parsed: serde_json::Value = serde_json::from_str(&output).unwrap();
-        assert!(parsed.is_array());
-        assert!(parsed.as_array().unwrap().is_empty());
+        assert!(parsed.is_object());
+        assert!(parsed["findings"].as_array().unwrap().is_empty());
+        assert!(parsed["skipped_files"].as_array().unwrap().is_empty());
     }
 
     #[test]
@@ -499,6 +604,7 @@ mod tests {
 
         let json = render(&ctx, ReportFormat::Json);
         assert!(json.contains("SCAN-001"));
+        assert!(json.contains("skipped_files"));
 
         let sarif = render(&ctx, ReportFormat::Sarif);
         assert!(sarif.contains("SCAN-001"));
