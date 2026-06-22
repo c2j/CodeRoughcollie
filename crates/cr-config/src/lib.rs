@@ -5,6 +5,10 @@ use std::path::Path;
 
 use serde::Deserialize;
 
+pub mod manifest;
+
+pub use manifest::{parse_manifest, ManifestEntry, ManifestError};
+
 /// 根配置，对应 `.roughcollie.toml` 文件。
 #[derive(Debug, Clone, Deserialize, Default)]
 #[serde(deny_unknown_fields)]

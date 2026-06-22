@@ -186,6 +186,51 @@ pub fn file_diff(baseline: &str, file_path: &str) -> Result<String, std::io::Err
     Ok(String::from_utf8_lossy(&output.stdout).into_owned())
 }
 
+/// 同步仓库到指定分支：fetch origin → checkout → pull --ff-only。
+///
+/// 若本地分支不存在，自动从 `origin/<branch>` 创建跟踪分支。
+/// 若 fast-forward 失败（本地有分叉提交），返回错误。
+///
+/// # Errors
+///
+/// 当仓库不存在、分支不存在于远端、或 git 命令执行失败时返回错误。
+pub fn sync_branch(branch: &str, repo_path: &Path) -> Result<(), std::io::Error> {
+    tracing::debug!(branch, repo_path = %repo_path.display(), step = "fetch", "sync_branch: 拉取 origin");
+    let fetch_output = Command::new("git").args(["fetch", "origin"]).current_dir(repo_path).output()?;
+
+    if !fetch_output.status.success() {
+        let stderr = String::from_utf8_lossy(&fetch_output.stderr);
+        return Err(std::io::Error::other(format!("git fetch origin 失败: {stderr}")));
+    }
+
+    tracing::debug!(branch, repo_path = %repo_path.display(), step = "checkout", "sync_branch: 切换分支");
+    let checkout_output = Command::new("git").args(["checkout", branch]).current_dir(repo_path).output()?;
+
+    if !checkout_output.status.success() {
+        // 本地分支不存在，尝试创建跟踪分支
+        tracing::debug!(branch, repo_path = %repo_path.display(), step = "checkout_B", "sync_branch: 创建跟踪分支");
+        let checkout_b_output = Command::new("git")
+            .args(["checkout", "-B", branch, &format!("origin/{branch}")])
+            .current_dir(repo_path)
+            .output()?;
+
+        if !checkout_b_output.status.success() {
+            let stderr = String::from_utf8_lossy(&checkout_b_output.stderr);
+            return Err(std::io::Error::other(format!("git checkout 失败: {stderr}")));
+        }
+    }
+
+    tracing::debug!(branch, repo_path = %repo_path.display(), step = "pull", "sync_branch: 快进拉取");
+    let pull_output = Command::new("git").args(["pull", "--ff-only"]).current_dir(repo_path).output()?;
+
+    if !pull_output.status.success() {
+        let stderr = String::from_utf8_lossy(&pull_output.stderr);
+        return Err(std::io::Error::other(format!("git pull --ff-only 失败: {stderr}")));
+    }
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -379,5 +424,125 @@ mod tests {
     fn test_walk_directory_empty_dirs() {
         let files = walk_directory(&[]).unwrap();
         assert!(files.is_empty());
+    }
+
+    // ── sync_branch tests ─────────────────────────────────────
+
+    /// Helper: initialize a bare repo + working clone with user config.
+    fn init_temp_repo() -> (tempfile::TempDir, PathBuf) {
+        let dir = tempfile::tempdir().expect("failed to create temp dir");
+        let bare_path = dir.path().join("repo.git");
+
+        let status =
+            Command::new("git").args(["init", "--bare"]).arg(&bare_path).status().expect("git init --bare failed");
+        assert!(status.success());
+
+        let work_path = dir.path().join("work");
+        let status = Command::new("git")
+            .args(["clone", &bare_path.to_string_lossy(), &work_path.to_string_lossy()])
+            .status()
+            .expect("git clone failed");
+        assert!(status.success());
+
+        for &(key, value) in &[("user.email", "test@test.com"), ("user.name", "Test User")] {
+            let status = Command::new("git")
+                .args(["config", key, value])
+                .current_dir(&work_path)
+                .status()
+                .expect("git config failed");
+            assert!(status.success());
+        }
+
+        (dir, work_path)
+    }
+
+    #[test]
+    fn test_sync_branch_ok() {
+        let (dir, work_path) = init_temp_repo();
+
+        // Push initial commit to establish main on remote
+        std::fs::write(work_path.join("initial.txt"), b"initial").expect("write failed");
+        let status =
+            Command::new("git").args(["add", "initial.txt"]).current_dir(&work_path).status().expect("git add failed");
+        assert!(status.success());
+        let status = Command::new("git")
+            .args(["commit", "-m", "initial commit"])
+            .current_dir(&work_path)
+            .status()
+            .expect("git commit failed");
+        assert!(status.success());
+        let status = Command::new("git")
+            .args(["push", "-u", "origin", "HEAD"])
+            .current_dir(&work_path)
+            .status()
+            .expect("git push failed");
+        assert!(status.success());
+
+        // Simulate upstream: clone bare, create feature branch, push
+        let upstream = tempfile::tempdir().expect("failed to create upstream temp dir");
+        let upstream_path = upstream.path().join("upstream");
+        let bare_path = dir.path().join("repo.git");
+        let status = Command::new("git")
+            .args(["clone", &bare_path.to_string_lossy(), &upstream_path.to_string_lossy()])
+            .status()
+            .expect("git clone upstream failed");
+        assert!(status.success());
+
+        for &(key, value) in &[("user.email", "upstream@test.com"), ("user.name", "Upstream User")] {
+            let status = Command::new("git")
+                .args(["config", key, value])
+                .current_dir(&upstream_path)
+                .status()
+                .expect("git config failed");
+            assert!(status.success());
+        }
+
+        let status = Command::new("git")
+            .args(["checkout", "-b", "feature"])
+            .current_dir(&upstream_path)
+            .status()
+            .expect("git checkout -b failed");
+        assert!(status.success());
+        std::fs::write(upstream_path.join("feature.txt"), b"feature work").expect("write failed");
+        let status = Command::new("git")
+            .args(["add", "feature.txt"])
+            .current_dir(&upstream_path)
+            .status()
+            .expect("git add failed");
+        assert!(status.success());
+        let status = Command::new("git")
+            .args(["commit", "-m", "feature commit"])
+            .current_dir(&upstream_path)
+            .status()
+            .expect("git commit failed");
+        assert!(status.success());
+        let status = Command::new("git")
+            .args(["push", "-u", "origin", "feature"])
+            .current_dir(&upstream_path)
+            .status()
+            .expect("git push failed");
+        assert!(status.success());
+
+        // Call sync_branch — should fetch, create tracking branch, pull
+        let result = sync_branch("feature", &work_path);
+        assert!(result.is_ok(), "sync_branch failed: {result:?}");
+
+        // Verify we're on the feature branch with the right content
+        let output = Command::new("git")
+            .args(["rev-parse", "--abbrev-ref", "HEAD"])
+            .current_dir(&work_path)
+            .output()
+            .expect("git rev-parse failed");
+        let branch_name = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        assert_eq!(branch_name, "feature");
+
+        assert!(work_path.join("feature.txt").exists());
+    }
+
+    #[test]
+    fn test_sync_branch_non_git_dir() {
+        let dir = tempfile::tempdir().expect("failed to create temp dir");
+        let result = sync_branch("main", dir.path());
+        assert!(result.is_err());
     }
 }

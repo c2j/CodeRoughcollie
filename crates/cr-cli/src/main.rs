@@ -4,6 +4,8 @@ use clap::{Parser, Subcommand};
 
 use encoding_rs::Encoding;
 
+mod manifest;
+
 /// CodeRoughcollie — GaussDB/openGauss 代码审核工具。
 #[derive(Parser)]
 #[command(name = "coderc", version, about, long_about = None)]
@@ -33,6 +35,16 @@ enum Commands {
         /// 待审核目录列表（逗号分隔，递归遍历，尊重 .gitignore）。
         #[arg(long, value_delimiter = ',')]
         dir: Vec<PathBuf>,
+
+        /// 待审核清单文件（CSV：project,branch,files）。提供时按清单逐条 pull + 审核。
+        #[arg(
+            long,
+            conflicts_with = "project",
+            conflicts_with = "files",
+            conflicts_with = "dir",
+            conflicts_with = "baseline"
+        )]
+        manifest: Option<PathBuf>,
 
         /// 输出格式：markdown / json / sarif / csv。
         #[arg(long, default_value = "markdown")]
@@ -79,6 +91,7 @@ fn main() {
         baseline,
         files,
         dir,
+        manifest,
         output_format,
         output_path,
         no_db,
@@ -95,6 +108,20 @@ fn main() {
     }
 
     let format = cr_report::ReportFormat::parse(&output_format).unwrap_or(cr_report::ReportFormat::Markdown);
+
+    if let Some(ref mpath) = manifest {
+        return manifest::run_manifest(
+            mpath,
+            &config,
+            format,
+            output_path.as_deref(),
+            no_db,
+            db_host.as_deref(),
+            db_name.as_deref(),
+            db_user.as_deref(),
+            db_password_env.as_deref(),
+        );
+    }
 
     match &project {
         Some(name) => run_single_project(
@@ -392,7 +419,7 @@ fn run_all_projects(
     }
 }
 
-async fn audit_files_async(
+pub(crate) async fn audit_files_async(
     files: &[PathBuf],
     db_config: Option<&cr_config::DatabaseConfig>,
     rules: &cr_config::RulesConfig,
