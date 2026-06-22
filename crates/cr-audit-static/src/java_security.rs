@@ -6,6 +6,8 @@
 //! Issue: https://github.com/c2j/astgrep/issues/21
 //! 当前实现：regex 过渡方案，消费 astgrep-core 类型以保证兼容性。
 
+use std::path::Path;
+
 use cr_core::{DiagnosticCategory, Finding, Severity};
 use regex::Regex;
 
@@ -66,11 +68,10 @@ pub fn audit_java_source(java_content: &str, file_path: &str) -> Vec<Finding> {
 }
 
 pub fn audit_security(filename: &str, content: &str) -> Vec<Finding> {
-    if filename.ends_with(".xml") && (content.contains("<mapper") || content.contains("DOCTYPE mapper")) {
-        return audit_mybatis_xml(content, filename);
+    let path = Path::new(filename);
+    match crate::file_type::detect(path, content) {
+        crate::FileKind::MyBatisXml => audit_mybatis_xml(content, filename),
+        crate::FileKind::Java => audit_java_source(content, filename),
+        _ => Vec::new(),
     }
-    if filename.ends_with(".java") {
-        return audit_java_source(content, filename);
-    }
-    Vec::new()
 }
