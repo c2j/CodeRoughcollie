@@ -17,8 +17,10 @@ enum Commands {
     /// 执行代码审核。
     Audit {
         /// Baseline 分支名（如 `main`、`origin/main`）。
+        ///
+        /// 可选。仅在未指定 --files/--dir 时用于 `git diff` 发现变更文件。
         #[arg(long)]
-        baseline: String,
+        baseline: Option<String>,
 
         /// 待审核文件列表（逗号分隔）。
         #[arg(long, value_delimiter = ',')]
@@ -81,7 +83,7 @@ fn main() {
             db_user,
             db_password_env,
         } => run_audit(
-            &baseline,
+            baseline.as_deref(),
             &files,
             &dir,
             &output_format,
@@ -132,7 +134,7 @@ fn read_file_with_encoding(path: &std::path::Path) -> std::io::Result<String> {
 
 #[allow(clippy::too_many_arguments)]
 fn run_audit(
-    baseline: &str,
+    baseline: Option<&str>,
     files: &[PathBuf],
     dirs: &[PathBuf],
     output_format: &str,
@@ -146,6 +148,12 @@ fn run_audit(
     let config = load_config();
 
     let user_explicit_sources = !files.is_empty() || !dirs.is_empty();
+
+    // 告警场景 1：baseline 与显式文件源共存
+    if user_explicit_sources && baseline.is_some() {
+        tracing::warn!("--baseline 在指定 --files/--dir 时不会用于文件发现，仅用于报告展示");
+    }
+
     let mut audit_files: Vec<PathBuf> = Vec::new();
     if !files.is_empty() {
         audit_files.extend(files.iter().cloned());
@@ -159,13 +167,36 @@ fn run_audit(
             }
         }
     }
-    // Dedup + sort for stable output
     audit_files.sort();
     audit_files.dedup();
-    // Fallback: only when user passed neither --files nor --dir, use git diff
+
     if !user_explicit_sources {
+        // 没有 --files/--dir，必须靠 git diff，此时 baseline 必填
+        let baseline = match baseline {
+            Some(b) => b,
+            None => {
+                tracing::error!("未指定 --files/--dir，且未提供 --baseline，无法确定审核范围。请提供 --baseline 分支名或使用 --files/--dir 显式指定文件");
+                std::process::exit(2);
+            }
+        };
+
+        // 预检 baseline 有效性
+        if let Err(e) = cr_git::validate_baseline(baseline) {
+            tracing::error!(error = %e, baseline = %baseline, "baseline 分支验证失败");
+            std::process::exit(2);
+        }
+
         audit_files = match cr_git::changed_files(baseline) {
-            Ok(f) => f.into_iter().filter(|cf| cf.is_sql() || cf.is_xml() || cf.is_java()).map(|cf| cf.path).collect(),
+            Ok(f) => {
+                // 告警场景 2：git diff 返回零文件
+                if f.is_empty() {
+                    tracing::warn!(baseline = %baseline, "相对于 baseline 未发现变更文件，可能 baseline 分支名有误或确实无变更");
+                }
+                f.into_iter()
+                    .filter(|cf| cf.is_sql() || cf.is_xml() || cf.is_java())
+                    .map(|cf| cf.path)
+                    .collect()
+            }
             Err(e) => {
                 tracing::error!(error = %e, "获取变更文件失败");
                 std::process::exit(2);
@@ -192,7 +223,7 @@ fn run_audit(
     let hs = cr_core::scoring::health_score(&all_findings);
     let hg = cr_core::scoring::HealthGrade::from_score(hs);
 
-    let ctx = cr_report::RenderContext::new(all_findings, severity_counts, hs, hg, baseline.to_string(), degraded)
+    let ctx = cr_report::RenderContext::new(all_findings, severity_counts, hs, hg, baseline.unwrap_or("unknown").to_string(), degraded)
         .with_skipped_files(skipped);
 
     let report = cr_report::render(&ctx, format);
