@@ -66,6 +66,13 @@ enum Commands {
         #[arg(long)]
         no_db: bool,
 
+        /// 启用行级 diff-aware 过滤（需配合 baseline；仅保留落在新增/变更行内的 findings）。
+        ///
+        /// 默认为文件级过滤（一旦文件出现在 diff 中即整体审核）。开启后可显著降低
+        /// 历史代码告警噪声，但依赖 git 仓库可用且 finding 路径与 diff 路径一致。
+        #[arg(long)]
+        diff_aware: bool,
+
         /// 数据库主机（覆盖配置文件）。
         #[arg(long)]
         db_host: Option<String>,
@@ -105,6 +112,7 @@ fn main() {
         output_format,
         output_path,
         no_db,
+        diff_aware,
         db_host,
         db_name,
         db_user,
@@ -144,6 +152,7 @@ fn main() {
             format,
             output_path.as_deref(),
             no_db,
+            diff_aware,
             db_host.as_deref(),
             db_name.as_deref(),
             db_user.as_deref(),
@@ -160,7 +169,7 @@ fn main() {
             {
                 tracing::warn!("项目级参数（--baseline/--files/--dir/--db-*）在未指定 --project 时将被忽略");
             }
-            run_all_projects(&config, full, format, output_path.as_deref(), no_db);
+            run_all_projects(&config, full, format, output_path.as_deref(), no_db, diff_aware);
         }
     }
 }
@@ -290,6 +299,7 @@ fn run_single_project(
     format: cr_report::ReportFormat,
     output_path: Option<&std::path::Path>,
     no_db: bool,
+    diff_aware: bool,
     db_host: Option<&str>,
     db_name: Option<&str>,
     db_user: Option<&str>,
@@ -314,11 +324,8 @@ fn run_single_project(
         tracing::warn!("--baseline 在指定 --files/--dir/--full 时不会用于文件发现，仅用于报告展示");
     }
 
-    let full_dirs: Vec<PathBuf> = if full && files.is_empty() && dirs.is_empty() {
-        vec![repo_path.to_path_buf()]
-    } else {
-        Vec::new()
-    };
+    let full_dirs: Vec<PathBuf> =
+        if full && files.is_empty() && dirs.is_empty() { vec![repo_path.to_path_buf()] } else { Vec::new() };
     let effective_dirs: Vec<PathBuf> = if dirs.is_empty() { full_dirs } else { dirs.to_vec() };
     let audit_files = discover_audit_files(files, &effective_dirs, effective_baseline, repo_path, project.project_type);
 
@@ -335,6 +342,12 @@ fn run_single_project(
         db_user,
         db_password_env,
     ));
+
+    let all_findings = if diff_aware {
+        apply_diff_aware_filter(all_findings, effective_baseline, repo_path)
+    } else {
+        all_findings
+    };
 
     let severity_counts = cr_core::scoring::count_by_severity(&all_findings);
     let hs = cr_core::scoring::health_score(&all_findings);
@@ -380,6 +393,7 @@ fn run_all_projects(
     format: cr_report::ReportFormat,
     output_path: Option<&std::path::Path>,
     no_db: bool,
+    diff_aware: bool,
 ) {
     let mut sections = Vec::new();
 
@@ -397,17 +411,19 @@ fn run_all_projects(
         let repo_path = Path::new(project.git_repo.as_deref().unwrap_or("."));
         let db_config = project.database.as_ref().and_then(|n| config.databases.get(n));
 
-        let audit_dirs: Vec<PathBuf> = if full {
-            vec![repo_path.to_path_buf()]
-        } else {
-            Vec::new()
-        };
+        let audit_dirs: Vec<PathBuf> = if full { vec![repo_path.to_path_buf()] } else { Vec::new() };
         let audit_files = discover_audit_files(&[], &audit_dirs, baseline, repo_path, project.project_type);
 
         tracing::info!(project = name, file_count = audit_files.len(), "开始审核");
 
         let (findings, degraded, skipped) =
             rt.block_on(audit_files_async(&audit_files, db_config, &config.rules, no_db, None, None, None, None));
+
+        let findings = if diff_aware {
+            apply_diff_aware_filter(findings, baseline, repo_path)
+        } else {
+            findings
+        };
 
         let severity_counts = cr_core::scoring::count_by_severity(&findings);
         let hs = cr_core::scoring::health_score(&findings);
@@ -441,6 +457,43 @@ fn run_all_projects(
     if total_critical > 0 {
         std::process::exit(1);
     }
+}
+
+fn apply_diff_aware_filter(
+    findings: Vec<cr_core::Finding>,
+    baseline: Option<&str>,
+    _repo_path: &Path,
+) -> Vec<cr_core::Finding> {
+    use cr_audit_static::diff_aware::{filter_findings_to_diff, parse_hunks};
+
+    let Some(baseline) = baseline else {
+        tracing::warn!("--diff-aware 缺少 baseline（--baseline 或 project.baseline），跳过行级过滤");
+        return findings;
+    };
+
+    let mut file_hunks: std::collections::HashMap<String, Vec<_>> = std::collections::HashMap::new();
+    let unique_files: std::collections::HashSet<&String> = findings.iter().map(|f| &f.file_path).collect();
+    for file in unique_files {
+        match cr_git::file_diff(baseline, file) {
+            Ok(diff_text) => {
+                let hunks = parse_hunks(&diff_text);
+                if hunks.is_empty() {
+                    tracing::debug!(file = %file, "diff 无 hunk（路径不在 diff 范围，如子模块或未跟踪文件），保留全部 findings");
+                } else {
+                    file_hunks.insert(file.clone(), hunks);
+                }
+            }
+            Err(e) => {
+                tracing::debug!(file = %file, error = %e, "无法获取 diff，按保守策略保留全部 findings");
+            }
+        }
+    }
+
+    let before = findings.len();
+    let filtered = filter_findings_to_diff(findings, &file_hunks);
+    let dropped = before - filtered.len();
+    tracing::info!(before, after = filtered.len(), dropped, "diff-aware 行级过滤完成");
+    filtered
 }
 
 pub(crate) async fn audit_files_async(
@@ -486,6 +539,43 @@ pub(crate) async fn audit_files_async(
         None
     };
 
+    let java_files_for_astgrep: Vec<PathBuf> = files
+        .iter()
+        .filter(|p| p.extension().and_then(|e| e.to_str()).map(|e| e.eq_ignore_ascii_case("java")).unwrap_or(false))
+        .cloned()
+        .collect();
+
+    let astgrep_results: std::collections::HashMap<String, Vec<cr_core::Finding>> =
+        if !java_files_for_astgrep.is_empty() && !rules.astgrep.preset.is_empty() {
+            let options = cr_audit_static::AstgrepOptions {
+                language: "java".to_string(),
+                severity_threshold: rules.astgrep.severity_threshold.clone(),
+                ..Default::default()
+            };
+            tracing::info!(
+                files = java_files_for_astgrep.len(),
+                presets = ?rules.astgrep.preset,
+                "astgrep 批量扫描启动"
+            );
+            match cr_audit_static::audit_files_with_astgrep(&java_files_for_astgrep, &rules.astgrep.preset, &options) {
+                Ok(findings) => {
+                    tracing::info!(total = findings.len(), "astgrep 扫描完成");
+                    let mut grouped: std::collections::HashMap<String, Vec<cr_core::Finding>> =
+                        java_files_for_astgrep.iter().map(|p| (p.to_string_lossy().to_string(), Vec::new())).collect();
+                    for f in findings {
+                        grouped.entry(f.file_path.clone()).or_default().push(f);
+                    }
+                    grouped
+                }
+                Err(e) => {
+                    tracing::warn!(error = %e, "astgrep 扫描失败，Java 文件降级到 regex");
+                    std::collections::HashMap::new()
+                }
+            }
+        } else {
+            std::collections::HashMap::new()
+        };
+
     for file_path in files {
         let content = match read_file_with_encoding(file_path) {
             Ok(c) => c,
@@ -504,7 +594,11 @@ pub(crate) async fn audit_files_async(
             }
             cr_audit_static::FileKind::Java => {
                 tracing::debug!(path = %file_path.display(), "Java 安全扫描中");
-                cr_audit_static::java_security::audit_java_source(&content, &file_path_str)
+                if let Some(astgrep_findings) = astgrep_results.get(&file_path_str) {
+                    astgrep_findings.clone()
+                } else {
+                    cr_audit_static::java_security::audit_java_source(&content, &file_path_str)
+                }
             }
             cr_audit_static::FileKind::MyBatisXml => {
                 tracing::debug!(path = %file_path.display(), "MyBatis XML 安全扫描中");

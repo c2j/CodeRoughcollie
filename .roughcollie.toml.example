@@ -45,7 +45,12 @@ database = "gaussdb-prod"
 preset = "all"
 
 [rules.astgrep]
-preset = ["gaussdb-security", "java-sql-injection"]
+# preset 是 lib/cr-rules 下的相对路径（{lang}/{category}），可多选：
+#   java/security, java/database, java/code-standards, java/exception,
+#   java/performance, java/multithreading, java/memory,
+#   shell/security, shell/robustness, ...
+# glob: "java/*" 启用 java 下全部类别（实现中）
+preset = ["java/security", "java/database"]
 severity_threshold = "warning"
 
 [rules.complexity]
