@@ -1,0 +1,7 @@
+[projects.self]
+project_type = "mixed"
+baseline = "main"
+git_repo = "."
+
+[rules.ogexplain]
+preset = "all"

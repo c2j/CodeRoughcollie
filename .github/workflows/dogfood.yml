@@ -23,9 +23,18 @@ jobs:
 
       - name: Run self-audit
         run: |
+          FILES=$(git diff --name-only origin/${{ github.base_ref }})
+          if [[ -z "$FILES" ]]; then
+            echo "## CodeRoughcollie Self-Audit" > audit-report.md
+            echo "" >> audit-report.md
+            echo "No file changes against \`${{ github.base_ref }}\`." >> audit-report.md
+            exit 0
+          fi
+          FILES_CSV=$(echo "$FILES" | tr '\n' ',' | sed 's/,$//')
           coderc audit \
+            --config .github/dogfood.roughcollie.toml \
             --baseline origin/${{ github.base_ref }} \
-            --files $(git diff --name-only origin/${{ github.base_ref }} | tr '\n' ',') \
+            --files "$FILES_CSV" \
             --output-format markdown \
             --output-path audit-report.md
 
@@ -35,7 +44,10 @@ jobs:
         with:
           script: |
             const fs = require('fs');
-            const report = fs.readFileSync('audit-report.md', 'utf8');
+            let report = '## CodeRoughcollie Self-Audit\n\nSelf-audit did not produce a report (build or execution failed).';
+            if (fs.existsSync('audit-report.md')) {
+              report = fs.readFileSync('audit-report.md', 'utf8');
+            }
             github.rest.issues.createComment({
               issue_number: context.issue.number,
               owner: context.repo.owner,
