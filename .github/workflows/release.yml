@@ -21,6 +21,10 @@ jobs:
     name: Build linux-x86_64 (glibc >= 2.17)
     runs-on: ubuntu-22.04
     steps:
+      - name: Sanitize ref name
+        id: ref
+        shell: bash
+        run: echo "name=${GITHUB_REF_NAME//\//-}" >> $GITHUB_OUTPUT
       - uses: actions/checkout@v4
         with:
           submodules: true
@@ -40,16 +44,20 @@ jobs:
       - run: strip target/x86_64-unknown-linux-gnu/release/${{ env.BINARY_NAME }}
       - run: |
           cd target/x86_64-unknown-linux-gnu/release
-          tar czf ../../../coderc-${{ github.ref_name }}-linux-x86_64.tar.gz ${{ env.BINARY_NAME }}
+          tar czf "../../../coderc-${{ steps.ref.outputs.name }}-linux-x86_64.tar.gz" ${{ env.BINARY_NAME }}
       - uses: actions/upload-artifact@v4
         with:
           name: coderc-linux-x86_64
-          path: coderc-${{ github.ref_name }}-linux-x86_64.tar.gz
+          path: coderc-${{ steps.ref.outputs.name }}-linux-x86_64.tar.gz
 
   build-linux-arm64:
     name: Build linux-arm64 (glibc >= 2.17)
     runs-on: ubuntu-22.04
     steps:
+      - name: Sanitize ref name
+        id: ref
+        shell: bash
+        run: echo "name=${GITHUB_REF_NAME//\//-}" >> $GITHUB_OUTPUT
       - uses: actions/checkout@v4
         with:
           submodules: true
@@ -73,16 +81,20 @@ jobs:
           aarch64-linux-gnu-strip target/aarch64-unknown-linux-gnu/release/${{ env.BINARY_NAME }}
       - run: |
           cd target/aarch64-unknown-linux-gnu/release
-          tar czf ../../../coderc-${{ github.ref_name }}-linux-arm64.tar.gz ${{ env.BINARY_NAME }}
+          tar czf "../../../coderc-${{ steps.ref.outputs.name }}-linux-arm64.tar.gz" ${{ env.BINARY_NAME }}
       - uses: actions/upload-artifact@v4
         with:
           name: coderc-linux-arm64
-          path: coderc-${{ github.ref_name }}-linux-arm64.tar.gz
+          path: coderc-${{ steps.ref.outputs.name }}-linux-arm64.tar.gz
 
   build-windows-x86_64:
     name: Build windows-x86_64
     runs-on: windows-2022
     steps:
+      - name: Sanitize ref name
+        id: ref
+        shell: bash
+        run: echo "name=${GITHUB_REF_NAME//\//-}" >> $GITHUB_OUTPUT
       - name: Enable long paths
         run: git config --global core.longpaths true
         shell: bash
@@ -104,18 +116,18 @@ jobs:
         env:
           ASTGREP_RELEASE_BIN: ${{ github.workspace }}\lib\astgrep\target\x86_64-pc-windows-gnu\release\astgrep.exe
           CARGO_BUILD_EMBED_REQUIRED: "1"
-          CARGO_NET_GIT_FETCH_WITH_CLI: "true"
+          CARGO_NET_GIT_FETCH_CLI: "true"
           CARGO_HOME: C:\cargo
           RUSTFLAGS: "-C target-feature=+crt-static"
       - shell: pwsh
         run: |
           Compress-Archive `
             -Path "target/x86_64-pc-windows-gnu/release/${{ env.BINARY_NAME }}.exe" `
-            -DestinationPath "coderc-${{ github.ref_name }}-windows-x86_64.zip"
+            -DestinationPath "coderc-${{ steps.ref.outputs.name }}-windows-x86_64.zip"
       - uses: actions/upload-artifact@v4
         with:
           name: coderc-windows-x86_64
-          path: coderc-${{ github.ref_name }}-windows-x86_64.zip
+          path: coderc-${{ steps.ref.outputs.name }}-windows-x86_64.zip
 
   release:
     name: Create GitHub Release
