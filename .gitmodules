@@ -16,3 +16,6 @@
 [submodule "lib/astgrep"]
 	path = lib/astgrep
 	url = https://github.com/c2j/astgrep.git
+[submodule "lib/cr-rules"]
+	path = lib/cr-rules
+	url = git@github.com:c2j/cr-rules.git

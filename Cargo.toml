@@ -20,7 +20,7 @@ members = [
 edition = "2021"
 rust-version = "1.75"
 license = "MIT OR Apache-2.0"
-version = "0.1.0"
+version = "0.2.1"
 
 [workspace.dependencies]
 # 内部 crate 间依赖
@@ -46,6 +46,9 @@ async-trait = "0.1"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "time"] }
 regex = "1"
 encoding_rs = "0.8"
+tempfile = "3"
+dirs = "5"
+include_dir = "0.7"
 
 # 生态依赖（子模块 path 引用）
 ogsql-parser = { git = "https://github.com/c2j/ogsql-parser" }

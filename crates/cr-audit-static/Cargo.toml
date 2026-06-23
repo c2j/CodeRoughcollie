@@ -1,10 +1,16 @@
 [package]
 name = "cr-audit-static"
-description = "静态审核：SQL 反模式 AST 匹配 + Java/MyBatis 安全扫描"
+description = "静态审核：SQL 反模式 AST 匹配 + Java/MyBatis 安全扫描 + astgrep 规则 runner"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 version.workspace = true
+build = "build.rs"
+
+[features]
+default = []
+# 内嵌 astgrep 二进制与规则资源到 coderc 二进制（release 构建启用；dev 默认关闭走外部 PATH/env）。
+embed-astgrep = ["dep:include_dir"]
 
 [dependencies]
 cr-core = { workspace = true }
@@ -12,6 +18,13 @@ ogsql-parser = { workspace = true }
 metamorphosis-core = { workspace = true }
 metamorphosis-rules = { workspace = true }
 regex = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+tempfile = { workspace = true }
+dirs = { workspace = true }
+include_dir = { workspace = true, optional = true }
 
 [lints]
 workspace = true

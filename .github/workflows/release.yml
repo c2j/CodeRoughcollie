@@ -21,31 +21,47 @@ jobs:
     name: Build linux-x86_64 (glibc >= 2.17)
     runs-on: ubuntu-22.04
     steps:
+      - name: Sanitize ref name
+        id: ref
+        shell: bash
+        run: echo "name=${GITHUB_REF_NAME//\//-}" >> $GITHUB_OUTPUT
       - uses: actions/checkout@v4
         with:
           submodules: true
+          ssh-key: ${{ secrets.CR_RULES_DEPLOY_KEY }}
       - uses: dtolnay/rust-toolchain@stable
       - uses: mlugg/setup-zig@v1
         with:
           version: "0.13.0"
       - run: cargo install cargo-zigbuild
-      - run: cargo zigbuild --release --target x86_64-unknown-linux-gnu.2.17
+      - name: Build embedded astgrep (target)
+        run: cargo zigbuild --manifest-path lib/astgrep/Cargo.toml --release --target x86_64-unknown-linux-gnu.2.17
+      - name: Build coderc (embed-astgrep)
+        env:
+          ASTGREP_RELEASE_BIN: ${{ github.workspace }}/lib/astgrep/target/x86_64-unknown-linux-gnu/release/astgrep
+          CARGO_BUILD_EMBED_REQUIRED: "1"
+        run: cargo zigbuild --release --target x86_64-unknown-linux-gnu.2.17 --features cr-audit-static/embed-astgrep
       - run: strip target/x86_64-unknown-linux-gnu/release/${{ env.BINARY_NAME }}
       - run: |
           cd target/x86_64-unknown-linux-gnu/release
-          tar czf ../../../coderc-${{ github.ref_name }}-linux-x86_64.tar.gz ${{ env.BINARY_NAME }}
+          tar czf "../../../coderc-${{ steps.ref.outputs.name }}-linux-x86_64.tar.gz" ${{ env.BINARY_NAME }}
       - uses: actions/upload-artifact@v4
         with:
           name: coderc-linux-x86_64
-          path: coderc-${{ github.ref_name }}-linux-x86_64.tar.gz
+          path: coderc-${{ steps.ref.outputs.name }}-linux-x86_64.tar.gz
 
   build-linux-arm64:
     name: Build linux-arm64 (glibc >= 2.17)
     runs-on: ubuntu-22.04
     steps:
+      - name: Sanitize ref name
+        id: ref
+        shell: bash
+        run: echo "name=${GITHUB_REF_NAME//\//-}" >> $GITHUB_OUTPUT
       - uses: actions/checkout@v4
         with:
           submodules: true
+          ssh-key: ${{ secrets.CR_RULES_DEPLOY_KEY }}
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: aarch64-unknown-linux-gnu
@@ -53,45 +69,65 @@ jobs:
         with:
           version: "0.13.0"
       - run: cargo install cargo-zigbuild
-      - run: cargo zigbuild --release --target aarch64-unknown-linux-gnu.2.17
+      - name: Build embedded astgrep (target)
+        run: cargo zigbuild --manifest-path lib/astgrep/Cargo.toml --release --target aarch64-unknown-linux-gnu.2.17
+      - name: Build coderc (embed-astgrep)
+        env:
+          ASTGREP_RELEASE_BIN: ${{ github.workspace }}/lib/astgrep/target/aarch64-unknown-linux-gnu/release/astgrep
+          CARGO_BUILD_EMBED_REQUIRED: "1"
+        run: cargo zigbuild --release --target aarch64-unknown-linux-gnu.2.17 --features cr-audit-static/embed-astgrep
       - run: |
           sudo apt-get install -y binutils-aarch64-linux-gnu
           aarch64-linux-gnu-strip target/aarch64-unknown-linux-gnu/release/${{ env.BINARY_NAME }}
       - run: |
           cd target/aarch64-unknown-linux-gnu/release
-          tar czf ../../../coderc-${{ github.ref_name }}-linux-arm64.tar.gz ${{ env.BINARY_NAME }}
+          tar czf "../../../coderc-${{ steps.ref.outputs.name }}-linux-arm64.tar.gz" ${{ env.BINARY_NAME }}
       - uses: actions/upload-artifact@v4
         with:
           name: coderc-linux-arm64
-          path: coderc-${{ github.ref_name }}-linux-arm64.tar.gz
+          path: coderc-${{ steps.ref.outputs.name }}-linux-arm64.tar.gz
 
   build-windows-x86_64:
     name: Build windows-x86_64
     runs-on: windows-2022
     steps:
+      - name: Sanitize ref name
+        id: ref
+        shell: bash
+        run: echo "name=${GITHUB_REF_NAME//\//-}" >> $GITHUB_OUTPUT
       - name: Enable long paths
         run: git config --global core.longpaths true
         shell: bash
       - uses: actions/checkout@v4
         with:
           submodules: true
+          ssh-key: ${{ secrets.CR_RULES_DEPLOY_KEY }}
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: x86_64-pc-windows-gnu
-      - run: cargo build --release --target x86_64-pc-windows-gnu
+      - name: Build embedded astgrep (target)
+        run: cargo build --manifest-path lib/astgrep/Cargo.toml --release --target x86_64-pc-windows-gnu
         env:
           CARGO_NET_GIT_FETCH_WITH_CLI: "true"
+          CARGO_HOME: C:\cargo
+          RUSTFLAGS: "-C target-feature=+crt-static"
+      - name: Build coderc (embed-astgrep)
+        run: cargo build --release --target x86_64-pc-windows-gnu --features cr-audit-static/embed-astgrep
+        env:
+          ASTGREP_RELEASE_BIN: ${{ github.workspace }}\lib\astgrep\target\x86_64-pc-windows-gnu\release\astgrep.exe
+          CARGO_BUILD_EMBED_REQUIRED: "1"
+          CARGO_NET_GIT_FETCH_CLI: "true"
           CARGO_HOME: C:\cargo
           RUSTFLAGS: "-C target-feature=+crt-static"
       - shell: pwsh
         run: |
           Compress-Archive `
             -Path "target/x86_64-pc-windows-gnu/release/${{ env.BINARY_NAME }}.exe" `
-            -DestinationPath "coderc-${{ github.ref_name }}-windows-x86_64.zip"
+            -DestinationPath "coderc-${{ steps.ref.outputs.name }}-windows-x86_64.zip"
       - uses: actions/upload-artifact@v4
         with:
           name: coderc-windows-x86_64
-          path: coderc-${{ github.ref_name }}-windows-x86_64.zip
+          path: coderc-${{ steps.ref.outputs.name }}-windows-x86_64.zip
 
   release:
     name: Create GitHub Release

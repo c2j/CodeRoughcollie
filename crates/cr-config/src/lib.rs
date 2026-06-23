@@ -292,11 +292,11 @@ impl Config {
         toml::from_str(&content).map_err(ConfigError::Parse)
     }
 
-    /// 校验配置完整性：检查项目引用的数据库是否存在。
+    /// 校验配置完整性：检查项目引用的数据库是否存在、astgrep preset 路径格式合法。
     ///
     /// # Errors
     ///
-    /// 当项目引用了不存在的数据库时返回错误。
+    /// 当项目引用了不存在的数据库，或 astgrep preset 含 `..`/绝对路径/空字符串时返回错误。
     pub fn validate(&self) -> Result<(), ConfigError> {
         for (name, project) in &self.projects {
             if let Some(db_ref) = &project.database {
@@ -306,8 +306,26 @@ impl Config {
                 }
             }
         }
+        for preset in &self.rules.astgrep.preset {
+            validate_astgrep_preset(preset)?;
+        }
         Ok(())
     }
+}
+
+fn validate_astgrep_preset(preset: &str) -> Result<(), ConfigError> {
+    if preset.is_empty() {
+        return Err(ConfigError::InvalidAstgrepPreset { preset: preset.into(), reason: "空 preset".into() });
+    }
+    let path = Path::new(preset);
+    if path.is_absolute() {
+        return Err(ConfigError::InvalidAstgrepPreset { preset: preset.into(), reason: "禁止绝对路径".into() });
+    }
+    use std::path::Component;
+    if path.components().any(|c| matches!(c, Component::ParentDir)) {
+        return Err(ConfigError::InvalidAstgrepPreset { preset: preset.into(), reason: "禁止 `..` 越权".into() });
+    }
+    Ok(())
 }
 
 /// 配置错误。
@@ -323,6 +341,9 @@ pub enum ConfigError {
     /// 项目引用了不存在的数据库。
     #[error("项目 '{0}' 引用了不存在的数据库 '{1}'。可用数据库: {2}")]
     InvalidDatabaseRef(String, String, String),
+    /// astgrep preset 路径格式非法。
+    #[error("无效的 astgrep preset `{preset}`：{reason}")]
+    InvalidAstgrepPreset { preset: String, reason: String },
 }
 
 // --- 默认值函数 ---
