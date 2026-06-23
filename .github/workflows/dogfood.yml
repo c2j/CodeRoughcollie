@@ -13,6 +13,7 @@ jobs:
         with:
           fetch-depth: 0
           submodules: true
+          ssh-key: ${{ secrets.CR_RULES_DEPLOY_KEY }}
 
       # TODO: v0.1.0 发布后替换为下载预编译二进制
       - name: Build coderc from source
