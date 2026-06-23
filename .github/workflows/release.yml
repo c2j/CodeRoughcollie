@@ -29,7 +29,13 @@ jobs:
         with:
           version: "0.13.0"
       - run: cargo install cargo-zigbuild
-      - run: cargo zigbuild --release --target x86_64-unknown-linux-gnu.2.17
+      - name: Build embedded astgrep (target)
+        run: cargo zigbuild --manifest-path lib/astgrep/Cargo.toml --release --target x86_64-unknown-linux-gnu.2.17
+      - name: Build coderc (embed-astgrep)
+        env:
+          ASTGREP_RELEASE_BIN: ${{ github.workspace }}/lib/astgrep/target/x86_64-unknown-linux-gnu/release/astgrep
+          CARGO_BUILD_EMBED_REQUIRED: "1"
+        run: cargo zigbuild --release --target x86_64-unknown-linux-gnu.2.17 --features cr-audit-static/embed-astgrep
       - run: strip target/x86_64-unknown-linux-gnu/release/${{ env.BINARY_NAME }}
       - run: |
           cd target/x86_64-unknown-linux-gnu/release
@@ -53,7 +59,13 @@ jobs:
         with:
           version: "0.13.0"
       - run: cargo install cargo-zigbuild
-      - run: cargo zigbuild --release --target aarch64-unknown-linux-gnu.2.17
+      - name: Build embedded astgrep (target)
+        run: cargo zigbuild --manifest-path lib/astgrep/Cargo.toml --release --target aarch64-unknown-linux-gnu.2.17
+      - name: Build coderc (embed-astgrep)
+        env:
+          ASTGREP_RELEASE_BIN: ${{ github.workspace }}/lib/astgrep/target/aarch64-unknown-linux-gnu/release/astgrep
+          CARGO_BUILD_EMBED_REQUIRED: "1"
+        run: cargo zigbuild --release --target aarch64-unknown-linux-gnu.2.17 --features cr-audit-static/embed-astgrep
       - run: |
           sudo apt-get install -y binutils-aarch64-linux-gnu
           aarch64-linux-gnu-strip target/aarch64-unknown-linux-gnu/release/${{ env.BINARY_NAME }}
@@ -78,8 +90,17 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: x86_64-pc-windows-gnu
-      - run: cargo build --release --target x86_64-pc-windows-gnu
+      - name: Build embedded astgrep (target)
+        run: cargo build --manifest-path lib/astgrep/Cargo.toml --release --target x86_64-pc-windows-gnu
         env:
+          CARGO_NET_GIT_FETCH_WITH_CLI: "true"
+          CARGO_HOME: C:\cargo
+          RUSTFLAGS: "-C target-feature=+crt-static"
+      - name: Build coderc (embed-astgrep)
+        run: cargo build --release --target x86_64-pc-windows-gnu --features cr-audit-static/embed-astgrep
+        env:
+          ASTGREP_RELEASE_BIN: ${{ github.workspace }}\lib\astgrep\target\x86_64-pc-windows-gnu\release\astgrep.exe
+          CARGO_BUILD_EMBED_REQUIRED: "1"
           CARGO_NET_GIT_FETCH_WITH_CLI: "true"
           CARGO_HOME: C:\cargo
           RUSTFLAGS: "-C target-feature=+crt-static"
