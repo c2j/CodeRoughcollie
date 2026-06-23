@@ -1,6 +1,6 @@
 [projects.self]
 project_type = "mixed"
-baseline = "main"
+baseline = "origin/main"
 git_repo = "."
 
 [rules.ogexplain]
