@@ -567,7 +567,7 @@ dependencies = [
 
 [[package]]
 name = "cr-audit-complexity"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "cr-core",
  "ogsql-complexity",
@@ -575,7 +575,7 @@ dependencies = [
 
 [[package]]
 name = "cr-audit-explain"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "cr-core",
  "ogexplain-core",
@@ -584,7 +584,7 @@ dependencies = [
 
 [[package]]
 name = "cr-audit-impact"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "cr-core",
  "reqwest",
@@ -597,7 +597,7 @@ dependencies = [
 
 [[package]]
 name = "cr-audit-static"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "cr-core",
  "dirs",
@@ -615,7 +615,7 @@ dependencies = [
 
 [[package]]
 name = "cr-cli"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "clap",
  "cr-audit-complexity",
@@ -635,7 +635,7 @@ dependencies = [
 
 [[package]]
 name = "cr-config"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "csv",
  "serde",
@@ -646,7 +646,7 @@ dependencies = [
 
 [[package]]
 name = "cr-core"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "async-trait",
  "regex",
@@ -658,7 +658,7 @@ dependencies = [
 
 [[package]]
 name = "cr-db"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "async-trait",
  "cr-core",
@@ -672,7 +672,7 @@ dependencies = [
 
 [[package]]
 name = "cr-git"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "ignore",
  "tempfile",
@@ -682,7 +682,7 @@ dependencies = [
 
 [[package]]
 name = "cr-mcp-server"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "cr-audit-complexity",
  "cr-audit-static",
@@ -698,7 +698,7 @@ dependencies = [
 
 [[package]]
 name = "cr-plugin"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "cr-core",
  "libc",
@@ -709,7 +709,7 @@ dependencies = [
 
 [[package]]
 name = "cr-report"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "cr-core",
  "serde",
@@ -719,7 +719,7 @@ dependencies = [
 
 [[package]]
 name = "cr-server"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "axum",
  "chrono",
@@ -1954,7 +1954,7 @@ dependencies = [
 
 [[package]]
 name = "ogexplain-core"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "insta",
  "ogsql-parser",
@@ -1969,7 +1969,7 @@ dependencies = [
 
 [[package]]
 name = "ogsql-complexity"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "insta",
  "ogsql-parser",
