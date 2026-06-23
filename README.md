@@ -25,6 +25,26 @@ cargo run -p cr-cli -- audit \
 cargo run -p cr-cli -- --help
 ```
 
+### 清单批量审核（manifest）
+
+传入 CSV 清单文件，工具自动 `git pull` 每个仓库到指定分支并审核：
+
+```bash
+# 清单文件（CSV，首行表头固定为 project,branch,files）
+# project — .roughcollie.toml 中 [projects.*] 的项目名
+# branch  — 待审核的分支名（工具自动 fetch + checkout + pull --ff-only）
+# files   — 待审核文件列表，多个用分号 ; 分隔
+cat > audit.csv <<'EOF'
+project,branch,files
+order-service,feat/order-opt,"src/sql/query.sql;src/sql/proc.sql"
+payment-service,fix/pay-bug,src/mapper/PayMapper.xml
+EOF
+
+coderc audit --manifest audit.csv --output-format markdown
+```
+
+清单模式下 `--manifest` 与 `--project`/`--files`/`--dir`/`--baseline` 互斥；`--no-db`、`--output-*`、`--db-*` 等全局参数仍然生效。多个条目的审核结果合并为一份多项目报告。
+
 ## Workspace 结构
 
 | Crate | 职责 |
@@ -36,8 +56,8 @@ cargo run -p cr-cli -- --help
 | `cr-audit-complexity` | 复杂度评估 |
 | `cr-audit-impact` | 语义影响分析（三期） |
 | `cr-plugin` | 插件加载层（三期） |
-| `cr-git` | Git diff 解析 |
-| `cr-config` | TOML 配置解析 |
+| `cr-git` | Git diff 解析、分支同步 |
+| `cr-config` | TOML 配置解析、CSV 清单解析 |
 | `cr-report` | Markdown / JSON / SARIF 报告 |
 | `cr-mcp-server` | MCP Server（三期） |
 | `cr-cli` | 命令行入口（`coderc`） |

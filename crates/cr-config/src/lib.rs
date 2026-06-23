@@ -5,6 +5,10 @@ use std::path::Path;
 
 use serde::Deserialize;
 
+pub mod manifest;
+
+pub use manifest::{parse_manifest, ManifestEntry, ManifestError};
+
 /// 根配置，对应 `.roughcollie.toml` 文件。
 #[derive(Debug, Clone, Deserialize, Default)]
 #[serde(deny_unknown_fields)]
@@ -634,6 +638,19 @@ host = "localhost"
 "##;
         let result: Result<Config, _> = toml::from_str(toml_content);
         assert!(result.is_err(), "old [database] format should be rejected");
+    }
+
+    #[test]
+    fn test_project_name_with_slash() {
+        let toml_content = r#"
+[projects."c2j/ogagila"]
+project_type = "gaussdb-sql"
+baseline = "main"
+"#;
+        let config: Config = toml::from_str(toml_content).unwrap();
+        let project = config.projects.get("c2j/ogagila").unwrap();
+        assert_eq!(project.project_type, Some(ProjectType::GaussdbSql));
+        assert_eq!(project.baseline.as_deref(), Some("main"));
     }
 
     #[test]
