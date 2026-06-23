@@ -99,25 +99,18 @@ fn validate_preset_path(preset: &str) -> Result<(), AstgrepError> {
     }
     let path = Path::new(preset);
     if path.is_absolute() {
-        return Err(AstgrepError::InvalidPreset {
-            preset: preset.into(),
-            reason: "禁止绝对路径".into(),
-        });
+        return Err(AstgrepError::InvalidPreset { preset: preset.into(), reason: "禁止绝对路径".into() });
     }
     for comp in path.components() {
         use std::path::Component;
         match comp {
             Component::Normal(_) | Component::CurDir => {}
             Component::ParentDir => {
-                return Err(AstgrepError::InvalidPreset {
-                    preset: preset.into(),
-                    reason: "禁止 `..` 越权".into(),
-                });
+                return Err(AstgrepError::InvalidPreset { preset: preset.into(), reason: "禁止 `..` 越权".into() });
             }
             _ => {
                 return Err(AstgrepError::InvalidPreset {
-                    preset: preset.into(),
-                    reason: "包含非法路径组件".into(),
+                    preset: preset.into(), reason: "包含非法路径组件".into()
                 });
             }
         }
@@ -148,9 +141,7 @@ pub fn resolve_binary(options: &AstgrepOptions) -> Result<PathBuf, AstgrepError>
             return Ok(candidate);
         }
     }
-    Err(AstgrepError::BinaryUnavailable(
-        "未在 ASTGREP_BIN、内嵌资源或 PATH 中找到 astgrep 可执行文件".into(),
-    ))
+    Err(AstgrepError::BinaryUnavailable("未在 ASTGREP_BIN、内嵌资源或 PATH 中找到 astgrep 可执行文件".into()))
 }
 
 pub fn resolve_rules_root(options: &AstgrepOptions) -> Result<PathBuf, AstgrepError> {

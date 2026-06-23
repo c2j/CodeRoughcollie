@@ -46,26 +46,17 @@ pub fn materialize_astgrep_binary() -> Result<PathBuf, EmbedError> {
     if target.exists() && matches!(fs::metadata(&target), Ok(m) if m.len() == EMBEDDED_BIN.len() as u64) {
         return Ok(target);
     }
-    fs::create_dir_all(&target_dir).map_err(|source| EmbedError::Release {
-        dest: target_dir.display().to_string(),
-        source,
-    })?;
-    let mut f = fs::File::create(&target).map_err(|source| EmbedError::Release {
-        dest: target.display().to_string(),
-        source,
-    })?;
-    f.write_all(EMBEDDED_BIN).map_err(|source| EmbedError::Release {
-        dest: target.display().to_string(),
-        source,
-    })?;
+    fs::create_dir_all(&target_dir)
+        .map_err(|source| EmbedError::Release { dest: target_dir.display().to_string(), source })?;
+    let mut f = fs::File::create(&target)
+        .map_err(|source| EmbedError::Release { dest: target.display().to_string(), source })?;
+    f.write_all(EMBEDDED_BIN).map_err(|source| EmbedError::Release { dest: target.display().to_string(), source })?;
     drop(f);
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        fs::set_permissions(&target, fs::Permissions::from_mode(0o755)).map_err(|source| EmbedError::Release {
-            dest: target.display().to_string(),
-            source,
-        })?;
+        fs::set_permissions(&target, fs::Permissions::from_mode(0o755))
+            .map_err(|source| EmbedError::Release { dest: target.display().to_string(), source })?;
     }
     Ok(target)
 }
@@ -77,15 +68,10 @@ pub fn materialize_rules_root() -> Result<PathBuf, EmbedError> {
     if target.join(".materialized").exists() {
         return Ok(target);
     }
-    fs::create_dir_all(&target).map_err(|source| EmbedError::Release {
-        dest: target.display().to_string(),
-        source,
-    })?;
+    fs::create_dir_all(&target).map_err(|source| EmbedError::Release { dest: target.display().to_string(), source })?;
     extract_dir(&EMBEDDED_RULES, &target)?;
-    fs::write(target.join(".materialized"), b"").map_err(|source| EmbedError::Release {
-        dest: target.display().to_string(),
-        source,
-    })?;
+    fs::write(target.join(".materialized"), b"")
+        .map_err(|source| EmbedError::Release { dest: target.display().to_string(), source })?;
     Ok(target)
 }
 
@@ -94,23 +80,17 @@ fn extract_dir(dir: &Dir<'_>, base: &Path) -> Result<(), EmbedError> {
         let path = base.join(entry.path());
         match entry {
             include_dir::DirEntry::Dir(d) => {
-                fs::create_dir_all(&path).map_err(|source| EmbedError::Release {
-                    dest: path.display().to_string(),
-                    source,
-                })?;
+                fs::create_dir_all(&path)
+                    .map_err(|source| EmbedError::Release { dest: path.display().to_string(), source })?;
                 extract_dir(d, &path)?;
             }
             include_dir::DirEntry::File(f) => {
                 if let Some(parent) = path.parent() {
-                    fs::create_dir_all(parent).map_err(|source| EmbedError::Release {
-                        dest: parent.display().to_string(),
-                        source,
-                    })?;
+                    fs::create_dir_all(parent)
+                        .map_err(|source| EmbedError::Release { dest: parent.display().to_string(), source })?;
                 }
-                fs::write(&path, f.contents()).map_err(|source| EmbedError::Release {
-                    dest: path.display().to_string(),
-                    source,
-                })?;
+                fs::write(&path, f.contents())
+                    .map_err(|source| EmbedError::Release { dest: path.display().to_string(), source })?;
             }
         }
     }

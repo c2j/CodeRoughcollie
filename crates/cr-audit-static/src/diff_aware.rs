@@ -51,10 +51,13 @@ pub fn finding_in_hunks(node_line: Option<usize>, hunks: &[Hunk]) -> bool {
 /// - 文件 diff 为空（hunks 空 vec）：全部丢弃（明确无变更）
 /// - 否则按 hunk 区间过滤
 pub fn filter_findings_to_diff(findings: Vec<Finding>, file_hunks: &HashMap<String, Vec<Hunk>>) -> Vec<Finding> {
-    findings.into_iter().filter(|f| match file_hunks.get(&f.file_path) {
-        None => true,
-        Some(hunks) => finding_in_hunks(f.node_line, hunks),
-    }).collect()
+    findings
+        .into_iter()
+        .filter(|f| match file_hunks.get(&f.file_path) {
+            None => true,
+            Some(hunks) => finding_in_hunks(f.node_line, hunks),
+        })
+        .collect()
 }
 
 #[cfg(test)]

@@ -343,11 +343,8 @@ fn run_single_project(
         db_password_env,
     ));
 
-    let all_findings = if diff_aware {
-        apply_diff_aware_filter(all_findings, effective_baseline, repo_path)
-    } else {
-        all_findings
-    };
+    let all_findings =
+        if diff_aware { apply_diff_aware_filter(all_findings, effective_baseline, repo_path) } else { all_findings };
 
     let severity_counts = cr_core::scoring::count_by_severity(&all_findings);
     let hs = cr_core::scoring::health_score(&all_findings);
@@ -419,11 +416,7 @@ fn run_all_projects(
         let (findings, degraded, skipped) =
             rt.block_on(audit_files_async(&audit_files, db_config, &config.rules, no_db, None, None, None, None));
 
-        let findings = if diff_aware {
-            apply_diff_aware_filter(findings, baseline, repo_path)
-        } else {
-            findings
-        };
+        let findings = if diff_aware { apply_diff_aware_filter(findings, baseline, repo_path) } else { findings };
 
         let severity_counts = cr_core::scoring::count_by_severity(&findings);
         let hs = cr_core::scoring::health_score(&findings);

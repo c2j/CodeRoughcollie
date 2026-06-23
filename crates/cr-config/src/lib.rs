@@ -315,24 +315,15 @@ impl Config {
 
 fn validate_astgrep_preset(preset: &str) -> Result<(), ConfigError> {
     if preset.is_empty() {
-        return Err(ConfigError::InvalidAstgrepPreset {
-            preset: preset.into(),
-            reason: "空 preset".into(),
-        });
+        return Err(ConfigError::InvalidAstgrepPreset { preset: preset.into(), reason: "空 preset".into() });
     }
     let path = Path::new(preset);
     if path.is_absolute() {
-        return Err(ConfigError::InvalidAstgrepPreset {
-            preset: preset.into(),
-            reason: "禁止绝对路径".into(),
-        });
+        return Err(ConfigError::InvalidAstgrepPreset { preset: preset.into(), reason: "禁止绝对路径".into() });
     }
     use std::path::Component;
     if path.components().any(|c| matches!(c, Component::ParentDir)) {
-        return Err(ConfigError::InvalidAstgrepPreset {
-            preset: preset.into(),
-            reason: "禁止 `..` 越权".into(),
-        });
+        return Err(ConfigError::InvalidAstgrepPreset { preset: preset.into(), reason: "禁止 `..` 越权".into() });
     }
     Ok(())
 }
