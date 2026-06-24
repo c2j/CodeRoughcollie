@@ -11,7 +11,7 @@ cr-core = { workspace = true }
 async-trait = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
-tokio-opengauss = { workspace = true }
+gaussdb = { workspace = true }
 tokio = { workspace = true }
 regex = { workspace = true }
 parking_lot = "0.12"

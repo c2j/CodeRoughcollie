@@ -5,10 +5,11 @@
 
 use std::time::Duration;
 
-use tokio_opengauss::{Client, SimpleQueryMessage};
+use gaussdb::{Client, SimpleQueryMessage};
 
 use cr_core::DbError;
 
+use crate::connection::full_error_chain;
 use crate::placeholder::fill_placeholders;
 
 /// Executes `EXPLAIN (ANALYZE, COSTS, BUFFERS, TIMING, FORMAT TEXT)` on the
@@ -51,7 +52,7 @@ pub async fn execute_explain(client: &Client, sql: &str, timeout_secs: u64) -> R
         Ok(Err(e)) => Err(DbError::ConnectionFailed {
             host: String::new(),
             port: 0,
-            reason: format!("EXPLAIN execution failed: {e}"),
+            reason: format!("EXPLAIN execution failed: {}", full_error_chain(&e)),
         }),
         Err(_elapsed) => {
             Err(DbError::SecurityRejected { reason: format!("EXPLAIN timed out after {timeout_secs} seconds") })

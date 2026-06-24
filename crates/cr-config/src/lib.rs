@@ -66,7 +66,7 @@ pub enum ProjectType {
 }
 
 /// `[database]` 段。
-#[derive(Debug, Clone, Deserialize, Default)]
+#[derive(Clone, Deserialize, Default)]
 #[non_exhaustive]
 pub struct DatabaseConfig {
     /// 是否启用真实 EXPLAIN。
@@ -86,6 +86,9 @@ pub struct DatabaseConfig {
     pub username: String,
     /// 密码环境变量名。
     pub password_env: Option<String>,
+    /// 直接明文密码（优先级高于 `password_env`）。
+    #[serde(default)]
+    pub password: Option<String>,
     /// SSL 模式。
     #[serde(default = "default_ssl_mode")]
     pub ssl_mode: String,
@@ -98,6 +101,24 @@ pub struct DatabaseConfig {
     /// 安全配置。
     #[serde(default)]
     pub security: SecurityConfig,
+}
+
+impl std::fmt::Debug for DatabaseConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("DatabaseConfig")
+            .field("enabled", &self.enabled)
+            .field("host", &self.host)
+            .field("port", &self.port)
+            .field("database", &self.database)
+            .field("username", &self.username)
+            .field("password_env", &self.password_env)
+            .field("password", &self.password.as_ref().map(|_| "<redacted>"))
+            .field("ssl_mode", &self.ssl_mode)
+            .field("auth_method", &self.auth_method)
+            .field("explain", &self.explain)
+            .field("security", &self.security)
+            .finish_non_exhaustive()
+    }
 }
 
 /// `[database.explain]` 段。
@@ -694,5 +715,26 @@ baseline = "main"
         let result = Config::load_from_file(&path);
         assert!(result.is_err());
         let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn test_database_config_debug_redacts_password() {
+        let config = DatabaseConfig {
+            password: Some("secret".into()),
+            ..Default::default()
+        };
+        let debug_str = format!("{config:?}");
+        assert!(debug_str.contains("<redacted>"), "should contain redacted marker: {debug_str}");
+        assert!(!debug_str.contains("secret"), "should NOT contain plaintext: {debug_str}");
+    }
+
+    #[test]
+    fn test_database_config_debug_none_password() {
+        let config = DatabaseConfig {
+            password: None,
+            ..Default::default()
+        };
+        let debug_str = format!("{config:?}");
+        assert!(debug_str.contains("None"), "should show None for absent password: {debug_str}");
     }
 }

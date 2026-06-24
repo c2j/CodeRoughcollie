@@ -511,6 +511,7 @@ pub(crate) async fn audit_files_async(
             let password = db_password_env
                 .and_then(|env_var| std::env::var(env_var).ok())
                 .or_else(|| db.password_env.as_ref().and_then(|env_var| std::env::var(env_var).ok()))
+                .or_else(|| db.password.clone())
                 .unwrap_or_default();
 
             tracing::info!(host = host, db = database, "连接 GaussDB 中");
