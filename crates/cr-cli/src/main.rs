@@ -708,20 +708,50 @@ async fn audit_sql_file(
     ));
 
     if let Some(conn) = db_conn {
-        tracing::debug!("EXPLAIN 审核中");
-        let timeout = db_config.map(|d| d.explain.timeout_seconds).unwrap_or(30);
-        match cr_db::execute_explain(conn.client(), sql, timeout).await {
-            Ok(explain_text) => match cr_audit_explain::analyze_explain_text(&explain_text, "inline") {
-                Ok(explain_findings) => findings.extend(explain_findings),
+        if !is_explainable_dml(sql) {
+            tracing::debug!("跳过 EXPLAIN（非 DML 语句：CREATE/ALTER/DROP/SET/TRIGGER/...）");
+        } else {
+            tracing::debug!("EXPLAIN 审核中");
+            let timeout = db_config.map(|d| d.explain.timeout_seconds).unwrap_or(30);
+            match cr_db::execute_explain(conn.client(), sql, timeout).await {
+                Ok(explain_text) => match cr_audit_explain::analyze_explain_text(&explain_text, "inline") {
+                    Ok(explain_findings) => findings.extend(explain_findings),
+                    Err(e) => {
+                        tracing::warn!(error = %e, "EXPLAIN 解析失败，跳过执行计划审核");
+                    }
+                },
                 Err(e) => {
-                    tracing::warn!(error = %e, "EXPLAIN 解析失败，跳过执行计划审核");
+                    tracing::warn!(error = %e, "EXPLAIN 执行失败，该 SQL 仅静态审核");
                 }
-            },
-            Err(e) => {
-                tracing::warn!(error = %e, "EXPLAIN 执行失败，该 SQL 仅静态审核");
             }
         }
     }
 
     findings
+}
+
+fn is_explainable_dml(sql: &str) -> bool {
+    for raw_line in sql.lines() {
+        let trimmed = raw_line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        if trimmed.starts_with("--") {
+            continue;
+        }
+        if trimmed.starts_with("/*") {
+            continue;
+        }
+        let first_word = trimmed
+            .split_whitespace()
+            .next()
+            .unwrap_or("")
+            .trim_start_matches(|c: char| !c.is_alphabetic())
+            .to_uppercase();
+        return matches!(
+            first_word.as_str(),
+            "SELECT" | "INSERT" | "UPDATE" | "DELETE" | "MERGE" | "WITH"
+        );
+    }
+    false
 }
