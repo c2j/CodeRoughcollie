@@ -4,6 +4,7 @@ use clap::{Parser, Subcommand};
 
 use encoding_rs::Encoding;
 
+mod doctor;
 mod manifest;
 
 /// CodeRoughcollie — GaussDB/openGauss 代码审核工具。
@@ -15,6 +16,7 @@ struct Cli {
 }
 
 #[derive(Subcommand)]
+#[allow(clippy::large_enum_variant)]
 enum Commands {
     /// 执行代码审核。
     Audit {
@@ -89,6 +91,21 @@ enum Commands {
         #[arg(long)]
         db_password_env: Option<String>,
     },
+    /// 诊断数据库连通性（TCP / 认证 / 服务端信息）。
+    #[command(alias = "db-check")]
+    Doctor {
+        /// 配置文件路径（缺省为 .roughcollie.toml）。
+        #[arg(long)]
+        config: Option<PathBuf>,
+
+        /// 仅诊断指定数据库（缺省则诊断全部启用的数据库）。
+        #[arg(long)]
+        db: Option<String>,
+
+        /// 显示服务端版本、GUC 参数等详细信息。
+        #[arg(short, long)]
+        verbose: bool,
+    },
 }
 
 fn main() {
@@ -101,23 +118,71 @@ fn main() {
 
     let cli = Cli::parse();
 
-    let Commands::Audit {
-        config: config_path,
-        project,
-        full,
-        baseline,
-        files,
-        dir,
-        manifest,
-        output_format,
-        output_path,
-        no_db,
-        diff_aware,
-        db_host,
-        db_name,
-        db_user,
-        db_password_env,
-    } = cli.command;
+    match cli.command {
+        Commands::Audit {
+            config: config_path,
+            project,
+            full,
+            baseline,
+            files,
+            dir,
+            manifest,
+            output_format,
+            output_path,
+            no_db,
+            diff_aware,
+            db_host,
+            db_name,
+            db_user,
+            db_password_env,
+        } => {
+            run_audit(
+                config_path,
+                project,
+                full,
+                baseline,
+                files,
+                dir,
+                manifest,
+                output_format,
+                output_path,
+                no_db,
+                diff_aware,
+                db_host,
+                db_name,
+                db_user,
+                db_password_env,
+            )
+        }
+        Commands::Doctor {
+            config,
+            db,
+            verbose,
+        } => {
+            let code = doctor::run_doctor(config.as_deref(), db.as_deref(), verbose);
+            std::process::exit(code);
+        }
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn run_audit(
+    config_path: Option<PathBuf>,
+    project: Option<String>,
+    full: bool,
+    baseline: Option<String>,
+    files: Vec<PathBuf>,
+    dir: Vec<PathBuf>,
+    manifest: Option<PathBuf>,
+    output_format: String,
+    output_path: Option<PathBuf>,
+    no_db: bool,
+    diff_aware: bool,
+    db_host: Option<String>,
+    db_name: Option<String>,
+    db_user: Option<String>,
+    db_password_env: Option<String>,
+) {
 
     let config = load_config(config_path.as_deref());
     if let Err(e) = config.validate() {

@@ -814,6 +814,7 @@ dependencies = [
  "cr-git",
  "cr-report",
  "encoding_rs",
+ "gaussdb",
  "serde_json",
  "tokio",
  "tracing",

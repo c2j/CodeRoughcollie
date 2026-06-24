@@ -105,7 +105,7 @@ impl GaussDbConnection {
 /// source error in order. This is particularly useful for [`gaussdb::Error`]
 /// whose `Display` only produces `"db error"` for the `Db` variant, hiding
 /// the underlying server message in the [`gaussdb::error::DbError`] source.
-pub(crate) fn full_error_chain(e: &dyn std::error::Error) -> String {
+pub fn full_error_chain(e: &dyn std::error::Error) -> String {
     let mut s = e.to_string();
     let mut src = e.source();
     while let Some(cause) = src {
