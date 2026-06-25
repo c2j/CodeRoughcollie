@@ -9,12 +9,14 @@
 use cr_core::{DiagnosticCategory, Finding, Severity};
 use ogsql_parser::ast::visitor::{walk_statement, Visitor, VisitorResult};
 use ogsql_parser::ast::SelectTarget;
-use ogsql_parser::{Parser, Statement, Tokenizer};
+use ogsql_parser::Statement;
 
 /// 对单条或多条 SQL 进行静态反模式检测。
 ///
-/// 解析输入的 SQL 文本，对每一条语句进行 AST 遍历，返回所有检测到的反模式发现。
-/// 解析失败时返回空列表。
+/// 解析输入的 SQL 文本，产出三层诊断：
+/// 1. 词法/语法错误（PARSE-*）
+/// 2. 语义校验 + lint 反模式（VAL-* / LINT-*）
+/// 3. 自有反模式 visitor（STATIC-SELECT-STAR / STATIC-DELETE-NO-WHERE / STATIC-UPDATE-NO-WHERE）
 ///
 /// # 示例
 ///
@@ -22,25 +24,24 @@ use ogsql_parser::{Parser, Statement, Tokenizer};
 /// use cr_audit_static::audit_sql;
 ///
 /// let findings = audit_sql("SELECT * FROM users", "test.sql");
-/// assert_eq!(findings.len(), 1);
-/// assert_eq!(findings[0].rule_id, "STATIC-SELECT-STAR");
+/// assert!(findings.iter().any(|f| f.rule_id == "STATIC-SELECT-STAR"));
 /// ```
 #[must_use]
 pub fn audit_sql(sql: &str, file_path: &str) -> Vec<Finding> {
-    let tokens = match Tokenizer::new(sql).tokenize() {
-        Ok(tokens) => tokens,
-        Err(_) => return Vec::new(),
-    };
+    let mut findings = Vec::new();
 
-    let mut parser = Parser::new(tokens);
-    let statements = parser.parse();
+    let (stmt_infos, parse_errors) = ogsql_parser::Parser::parse_sql(sql);
+
+    findings.extend(crate::validation::parser_errors_to_findings(&parse_errors, file_path));
+    findings.extend(crate::validation::validate_statements(&stmt_infos, file_path));
 
     let mut visitor = SqlAntiPatternVisitor::new(file_path);
-    for stmt in &statements {
-        walk_statement(&mut visitor, stmt);
+    for si in &stmt_infos {
+        walk_statement(&mut visitor, &si.statement);
     }
+    findings.extend(visitor.findings);
 
-    visitor.findings
+    findings
 }
 
 /// SQL 反模式检测访问者。
@@ -152,55 +153,63 @@ impl Visitor for SqlAntiPatternVisitor {
 mod tests {
     use super::*;
 
+    fn rule_ids(findings: &[Finding]) -> Vec<&str> {
+        findings.iter().map(|f| f.rule_id.as_str()).collect()
+    }
+
     #[test]
     fn test_select_star_detected() {
         let findings = audit_sql("SELECT * FROM users", "test.sql");
-        assert_eq!(findings.len(), 1);
-        assert_eq!(findings[0].rule_id, "STATIC-SELECT-STAR");
-        assert_eq!(findings[0].severity, Severity::Warning);
-        assert_eq!(findings[0].category, DiagnosticCategory::ScanEfficiency);
-        assert_eq!(findings[0].file_path, "test.sql");
+        let ids = rule_ids(&findings);
+        let star = findings.iter().find(|f| f.rule_id == "STATIC-SELECT-STAR").expect("STATIC-SELECT-STAR should fire");
+        assert_eq!(star.severity, Severity::Warning);
+        assert_eq!(star.category, DiagnosticCategory::ScanEfficiency);
+        assert_eq!(star.file_path, "test.sql");
+        assert!(ids.iter().any(|id| id.starts_with("LINT-")), "linter should also flag SELECT *");
     }
 
     #[test]
     fn test_select_star_with_table_prefix() {
         let findings = audit_sql("SELECT users.* FROM users", "test.sql");
-        assert_eq!(findings.len(), 1);
-        assert_eq!(findings[0].rule_id, "STATIC-SELECT-STAR");
+        assert!(rule_ids(&findings).contains(&"STATIC-SELECT-STAR"));
     }
 
     #[test]
     fn test_select_specific_columns_no_finding() {
         let findings = audit_sql("SELECT id, name FROM users", "test.sql");
-        assert_eq!(findings.len(), 0);
+        assert!(findings.is_empty());
     }
 
     #[test]
     fn test_delete_no_where() {
         let findings = audit_sql("DELETE FROM users", "test.sql");
-        assert_eq!(findings.len(), 1);
-        assert_eq!(findings[0].rule_id, "STATIC-DELETE-NO-WHERE");
-        assert_eq!(findings[0].severity, Severity::Critical);
+        let del = findings
+            .iter()
+            .find(|f| f.rule_id == "STATIC-DELETE-NO-WHERE")
+            .expect("STATIC-DELETE-NO-WHERE should fire");
+        assert_eq!(del.severity, Severity::Critical);
     }
 
     #[test]
     fn test_delete_with_where_no_finding() {
         let findings = audit_sql("DELETE FROM users WHERE id = 1", "test.sql");
-        assert_eq!(findings.len(), 0);
+        assert!(findings.is_empty());
     }
 
     #[test]
     fn test_update_no_where() {
         let findings = audit_sql("UPDATE users SET name = 'test'", "test.sql");
-        assert_eq!(findings.len(), 1);
-        assert_eq!(findings[0].rule_id, "STATIC-UPDATE-NO-WHERE");
-        assert_eq!(findings[0].severity, Severity::Critical);
+        let upd = findings
+            .iter()
+            .find(|f| f.rule_id == "STATIC-UPDATE-NO-WHERE")
+            .expect("STATIC-UPDATE-NO-WHERE should fire");
+        assert_eq!(upd.severity, Severity::Critical);
     }
 
     #[test]
     fn test_update_with_where_no_finding() {
         let findings = audit_sql("UPDATE users SET name = 'test' WHERE id = 1", "test.sql");
-        assert_eq!(findings.len(), 0);
+        assert!(findings.is_empty());
     }
 
     #[test]
@@ -209,35 +218,33 @@ mod tests {
             "SELECT * FROM users;\nDELETE FROM orders;\nUPDATE products SET price = 10 WHERE id = 1;",
             "test.sql",
         );
-        assert_eq!(findings.len(), 2);
-        let rule_ids: Vec<&str> = findings.iter().map(|f| f.rule_id.as_str()).collect();
-        assert!(rule_ids.contains(&"STATIC-SELECT-STAR"));
-        assert!(rule_ids.contains(&"STATIC-DELETE-NO-WHERE"));
+        let ids = rule_ids(&findings);
+        assert!(ids.contains(&"STATIC-SELECT-STAR"));
+        assert!(ids.contains(&"STATIC-DELETE-NO-WHERE"));
     }
 
     #[test]
-    fn test_invalid_sql_does_not_panic() {
+    fn test_invalid_sql_produces_parse_error() {
         let findings = audit_sql("INVALID SQL &&&", "test.sql");
-        assert!(findings.is_empty());
+        assert!(!findings.is_empty(), "invalid SQL should produce parse findings");
+        assert!(findings.iter().all(|f| f.category == DiagnosticCategory::ParseError));
     }
 
     #[test]
     fn test_empty_sql() {
         let findings = audit_sql("", "test.sql");
-        assert_eq!(findings.len(), 0);
+        assert!(findings.is_empty());
     }
 
     #[test]
     fn test_select_star_in_subquery() {
         let findings = audit_sql("SELECT id FROM (SELECT * FROM users) AS u", "test.sql");
-        assert_eq!(findings.len(), 1);
-        assert_eq!(findings[0].rule_id, "STATIC-SELECT-STAR");
+        assert!(rule_ids(&findings).contains(&"STATIC-SELECT-STAR"));
     }
 
     #[test]
     fn test_select_star_in_cte() {
         let findings = audit_sql("WITH cte AS (SELECT * FROM users) SELECT id FROM cte", "test.sql");
-        assert_eq!(findings.len(), 1);
-        assert_eq!(findings[0].rule_id, "STATIC-SELECT-STAR");
+        assert!(rule_ids(&findings).contains(&"STATIC-SELECT-STAR"));
     }
 }

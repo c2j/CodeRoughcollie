@@ -14,7 +14,7 @@ embed-astgrep = ["dep:include_dir"]
 
 [dependencies]
 cr-core = { workspace = true }
-ogsql-parser = { workspace = true }
+ogsql-parser = { workspace = true, features = ["ibatis", "java"] }
 metamorphosis-core = { workspace = true }
 metamorphosis-rules = { workspace = true }
 regex = { workspace = true }
