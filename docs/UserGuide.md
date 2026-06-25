@@ -306,7 +306,7 @@ CodeRoughcollie/
 │   ├── cr-audit-static/       # 静态审核（SQL 反模式 + Java 安全）
 │   ├── cr-audit-explain/      # EXPLAIN 分析（ogexplain-core，暂禁用）
 │   ├── cr-audit-complexity/   # 复杂度评估
-│   ├── cr-audit-impact/       # 影响分析（codeweb）
+│   ├── cr-audit-impact/       # 影响分析（子进程调用 codeweb）
 │   ├── cr-db/                 # GaussDB 连接管理
 │   ├── cr-git/                # Git diff 解析
 │   ├── cr-config/             # TOML 配置解析
