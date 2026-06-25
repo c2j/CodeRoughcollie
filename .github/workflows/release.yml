@@ -40,7 +40,7 @@ jobs:
         env:
           ASTGREP_RELEASE_BIN: ${{ github.workspace }}/lib/astgrep/target/x86_64-unknown-linux-gnu/release/astgrep
           CARGO_BUILD_EMBED_REQUIRED: "1"
-        run: cargo zigbuild --release --target x86_64-unknown-linux-gnu.2.17 --features cr-audit-static/embed-astgrep
+        run: cargo zigbuild -p cr-cli --release --target x86_64-unknown-linux-gnu.2.17 --features cr-audit-static/embed-astgrep
       - run: strip target/x86_64-unknown-linux-gnu/release/${{ env.BINARY_NAME }}
       - run: |
           cd target/x86_64-unknown-linux-gnu/release
@@ -75,7 +75,7 @@ jobs:
         env:
           ASTGREP_RELEASE_BIN: ${{ github.workspace }}/lib/astgrep/target/aarch64-unknown-linux-gnu/release/astgrep
           CARGO_BUILD_EMBED_REQUIRED: "1"
-        run: cargo zigbuild --release --target aarch64-unknown-linux-gnu.2.17 --features cr-audit-static/embed-astgrep
+        run: cargo zigbuild -p cr-cli --release --target aarch64-unknown-linux-gnu.2.17 --features cr-audit-static/embed-astgrep
       - run: |
           sudo apt-get install -y binutils-aarch64-linux-gnu
           aarch64-linux-gnu-strip target/aarch64-unknown-linux-gnu/release/${{ env.BINARY_NAME }}
@@ -112,7 +112,7 @@ jobs:
           CARGO_HOME: C:\cargo
           RUSTFLAGS: "-C target-feature=+crt-static"
       - name: Build coderc (embed-astgrep)
-        run: cargo build --release --target x86_64-pc-windows-gnu --features cr-audit-static/embed-astgrep
+        run: cargo build -p cr-cli --release --target x86_64-pc-windows-gnu --features cr-audit-static/embed-astgrep
         env:
           ASTGREP_RELEASE_BIN: ${{ github.workspace }}\lib\astgrep\target\x86_64-pc-windows-gnu\release\astgrep.exe
           CARGO_BUILD_EMBED_REQUIRED: "1"
