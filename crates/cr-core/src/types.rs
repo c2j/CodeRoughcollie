@@ -77,6 +77,10 @@ pub enum DiagnosticCategory {
     SubqueryStructure,
     /// DIST-* / SKEW-* 规则：分布式问题。
     DistributionIssue,
+    /// PARSE-* / VAL-SYNTAX-* 规则：SQL 词法/语法错误与警告。
+    ParseError,
+    /// VAL-PKG-* / VAL-MERGE-* / VAL-PL-* 规则：语义校验（package 一致性、MERGE 语义、PL 变量）。
+    ValidationSemantic,
     /// GEN-* / ANTI-* / AGG-* / STATS-* / PART-* 规则：通用。
     General,
 }
