@@ -54,7 +54,7 @@ coderc audit --manifest audit.csv --output-format markdown
 | `cr-audit-static` | 静态审核：SQL 反模式 + Java 安全扫描 |
 | `cr-audit-explain` | 真实执行计划审核 |
 | `cr-audit-complexity` | 复杂度评估 |
-| `cr-audit-impact` | 语义影响分析（三期） |
+| `cr-audit-impact` | 语义影响分析：子进程调用 codeweb 查调用链（三期） |
 | `cr-plugin` | 插件加载层（三期） |
 | `cr-git` | Git diff 解析、分支同步 |
 | `cr-config` | TOML 配置解析、CSV 清单解析 |

@@ -16,6 +16,7 @@ cr-report = { workspace = true }
 cr-audit-static = { workspace = true }
 cr-audit-explain = { workspace = true }
 cr-audit-complexity = { workspace = true }
+cr-audit-impact = { workspace = true }
 cr-config = { workspace = true }
 cr-db = { workspace = true }
 cr-git = { workspace = true }
@@ -26,6 +27,9 @@ tracing = { workspace = true }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 serde_json = { workspace = true }
 encoding_rs = { workspace = true }
+
+[dev-dependencies]
+toml = "0.8"
 
 [lints]
 workspace = true

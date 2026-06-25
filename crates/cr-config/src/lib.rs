@@ -32,6 +32,9 @@ pub struct Config {
     /// `[plugins]` 段（三期，全局）。
     #[serde(default)]
     pub plugins: PluginsConfig,
+    /// `[codeweb]` 段（三期，全局）。
+    #[serde(default)]
+    pub codeweb: CodewebConfig,
 }
 
 /// `[projects.*]` 段。
@@ -48,6 +51,8 @@ pub struct ProjectConfig {
     pub baseline: Option<String>,
     /// 引用的数据库名称（`[databases.*]` 的 key），`None` 为纯静态审核。
     pub database: Option<String>,
+    /// codeweb 影响分析配置（三期）。`None` 表示该项目不启用。
+    pub codeweb: Option<CodewebProjectConfig>,
 }
 
 /// 项目类型，驱动审核策略。
@@ -301,6 +306,28 @@ pub struct PluginsConfig {
     pub disabled: Vec<String>,
 }
 
+/// `[codeweb]` 段（全局）—— 子进程调用 codeweb 做语义影响分析。
+#[derive(Debug, Clone, Deserialize)]
+#[non_exhaustive]
+pub struct CodewebConfig {
+    /// codeweb 可执行文件路径；`None` 时从 PATH 查找 `codeweb`。
+    pub binary: Option<String>,
+    /// 子进程超时（秒）。
+    #[serde(default = "default_codeweb_timeout")]
+    pub timeout_secs: u64,
+}
+
+/// `[projects.x.codeweb]` 段（每项目）。
+#[derive(Debug, Clone, Deserialize, Default)]
+#[non_exhaustive]
+pub struct CodewebProjectConfig {
+    /// codeweb 项目目录（含 codeweb.toml / .codeweb/store.bincode）。
+    pub project_path: String,
+    /// 是否启用 impact 分析（opt-in，默认 false）。
+    #[serde(default)]
+    pub enabled: bool,
+}
+
 impl Config {
     /// 从文件加载配置。
     ///
@@ -433,6 +460,10 @@ fn default_allowed_commands() -> Vec<String> {
     vec!["EXPLAIN".to_string(), "SET".to_string(), "SHOW".to_string()]
 }
 
+const fn default_codeweb_timeout() -> u64 {
+    120
+}
+
 impl Default for ExplainConfig {
     fn default() -> Self {
         Self {
@@ -483,6 +514,12 @@ impl Default for OutputConfig {
             exit_code_on_critical: default_exit_code(),
             exit_code_on_warning: 0,
         }
+    }
+}
+
+impl Default for CodewebConfig {
+    fn default() -> Self {
+        Self { binary: None, timeout_secs: default_codeweb_timeout() }
     }
 }
 
@@ -719,10 +756,7 @@ baseline = "main"
 
     #[test]
     fn test_database_config_debug_redacts_password() {
-        let config = DatabaseConfig {
-            password: Some("secret".into()),
-            ..Default::default()
-        };
+        let config = DatabaseConfig { password: Some("secret".into()), ..Default::default() };
         let debug_str = format!("{config:?}");
         assert!(debug_str.contains("<redacted>"), "should contain redacted marker: {debug_str}");
         assert!(!debug_str.contains("secret"), "should NOT contain plaintext: {debug_str}");
@@ -730,11 +764,45 @@ baseline = "main"
 
     #[test]
     fn test_database_config_debug_none_password() {
-        let config = DatabaseConfig {
-            password: None,
-            ..Default::default()
-        };
+        let config = DatabaseConfig { password: None, ..Default::default() };
         let debug_str = format!("{config:?}");
         assert!(debug_str.contains("None"), "should show None for absent password: {debug_str}");
+    }
+
+    #[test]
+    fn test_codeweb_global_config() {
+        let toml_content = r#"
+[codeweb]
+binary = "/usr/local/bin/codeweb"
+timeout_secs = 180
+"#;
+        let config: Config = toml::from_str(toml_content).unwrap();
+        assert_eq!(config.codeweb.binary.as_deref(), Some("/usr/local/bin/codeweb"));
+        assert_eq!(config.codeweb.timeout_secs, 180);
+    }
+
+    #[test]
+    fn test_codeweb_per_project_config() {
+        let toml_content = r#"
+[projects.demo]
+git_repo = "/srv/demo"
+
+[projects.demo.codeweb]
+project_path = "/srv/demo"
+enabled = true
+"#;
+        let config: Config = toml::from_str(toml_content).unwrap();
+        let p = config.projects.get("demo").unwrap();
+        let cw = p.codeweb.as_ref().unwrap();
+        assert_eq!(cw.project_path, "/srv/demo");
+        assert!(cw.enabled);
+    }
+
+    #[test]
+    fn test_codeweb_absent_defaults() {
+        let config: Config = toml::from_str("[projects.x]\ngit_repo=\".\"\n").unwrap();
+        assert!(config.codeweb.binary.is_none());
+        assert_eq!(config.codeweb.timeout_secs, 120);
+        assert!(config.projects.get("x").unwrap().codeweb.is_none());
     }
 }
