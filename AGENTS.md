@@ -66,6 +66,18 @@ git commit -m "chore(submodule): bump <name> to <new-short-sha>"
 
 如果子模块工作树脏(有未提交修改),**必须先 stash 或 commit 到上游仓库**,然后再升级。绝不要带着脏工作树做 `git submodule update`。
 
+### 避免污染子模块工作树(常见陷阱)
+
+子模块通过 path dependency 被 workspace 引入,仓库根的若干命令会**静默波及**子模块源码,留下脏工作树。以下是已踩过的坑与防范:
+
+| 陷阱 | 后果 | 防范 |
+|---|---|---|
+| 在仓库根跑 `cargo fmt --all`(不带 `--check`) | workspace 内所有 crate(含子模块)被格式化,产生大量 fmt-only 改动 | 只用 `cargo fmt -p <具体 crate>`,或提交前改用 `cargo fmt --all -- --check` 做只检查 |
+| 在子模块内跑测试,insta 等库留下 `*.snap.new` | 子模块工作树出现未跟踪产物,父仓库标记 `modified content` | 测试后用 `cargo insta reject` 或手动清理;跑前确认子模块干净 |
+| 误在子模块内创建嵌套目录(如 `lib/<name>/lib/<name>/`) | 留下未跟踪垃圾,父仓库持续显示子模块脏 | 调试脚本注意 CWD;离开前 `git -C lib/<name> status --porcelain` 必须为空 |
+
+**在子模块内执行任何构建/测试/格式化之前,先确认 `git -C lib/<name> status --porcelain` 为空;操作之后再次确认。** 发现脏工作树立即 `git restore .` 并清理未跟踪产物,绝不要把脏状态留给下一次 `git submodule update`。
+
 ---
 
 ## 仓库其他约定
