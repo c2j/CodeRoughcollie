@@ -10,8 +10,8 @@ pub mod placeholder;
 pub mod pool;
 pub mod security;
 
-pub use connection::GaussDbConnection;
 pub use connection::full_error_chain;
+pub use connection::GaussDbConnection;
 pub use explain_executor::execute_explain;
 pub use placeholder::{fill_placeholders, has_placeholders};
 pub use security::validate_readonly;
