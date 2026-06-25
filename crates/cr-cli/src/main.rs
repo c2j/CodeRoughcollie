@@ -52,7 +52,8 @@ enum Commands {
             conflicts_with = "project",
             conflicts_with = "files",
             conflicts_with = "dir",
-            conflicts_with = "baseline"
+            conflicts_with = "baseline",
+            conflicts_with = "codeweb_analyze"
         )]
         manifest: Option<PathBuf>,
 
@@ -74,6 +75,13 @@ enum Commands {
         /// 历史代码告警噪声，但依赖 git 仓库可用且 finding 路径与 diff 路径一致。
         #[arg(long)]
         diff_aware: bool,
+
+        /// 显式触发 codeweb 建图（`codeweb analyze`），不依赖 --full 模式。
+        ///
+        /// 仅当项目配置了 [projects.x.codeweb] enabled=true 时生效。
+        /// 建图失败仅 warn 不中断审核。
+        #[arg(long)]
+        codeweb_analyze: bool,
 
         /// 数据库主机（覆盖配置文件）。
         #[arg(long)]
@@ -131,34 +139,30 @@ fn main() {
             output_path,
             no_db,
             diff_aware,
+            codeweb_analyze,
             db_host,
             db_name,
             db_user,
             db_password_env,
-        } => {
-            run_audit(
-                config_path,
-                project,
-                full,
-                baseline,
-                files,
-                dir,
-                manifest,
-                output_format,
-                output_path,
-                no_db,
-                diff_aware,
-                db_host,
-                db_name,
-                db_user,
-                db_password_env,
-            )
-        }
-        Commands::Doctor {
-            config,
-            db,
-            verbose,
-        } => {
+        } => run_audit(
+            config_path,
+            project,
+            full,
+            baseline,
+            files,
+            dir,
+            manifest,
+            output_format,
+            output_path,
+            no_db,
+            diff_aware,
+            codeweb_analyze,
+            db_host,
+            db_name,
+            db_user,
+            db_password_env,
+        ),
+        Commands::Doctor { config, db, verbose } => {
             let code = doctor::run_doctor(config.as_deref(), db.as_deref(), verbose);
             std::process::exit(code);
         }
@@ -178,12 +182,12 @@ fn run_audit(
     output_path: Option<PathBuf>,
     no_db: bool,
     diff_aware: bool,
+    codeweb_analyze: bool,
     db_host: Option<String>,
     db_name: Option<String>,
     db_user: Option<String>,
     db_password_env: Option<String>,
 ) {
-
     let config = load_config(config_path.as_deref());
     if let Err(e) = config.validate() {
         tracing::error!(error = %e, "配置校验失败");
@@ -218,6 +222,7 @@ fn run_audit(
             output_path.as_deref(),
             no_db,
             diff_aware,
+            codeweb_analyze,
             db_host.as_deref(),
             db_name.as_deref(),
             db_user.as_deref(),
@@ -234,7 +239,7 @@ fn run_audit(
             {
                 tracing::warn!("项目级参数（--baseline/--files/--dir/--db-*）在未指定 --project 时将被忽略");
             }
-            run_all_projects(&config, full, format, output_path.as_deref(), no_db, diff_aware);
+            run_all_projects(&config, full, format, output_path.as_deref(), no_db, diff_aware, codeweb_analyze);
         }
     }
 }
@@ -365,6 +370,7 @@ fn run_single_project(
     output_path: Option<&std::path::Path>,
     no_db: bool,
     diff_aware: bool,
+    codeweb_analyze: bool,
     db_host: Option<&str>,
     db_name: Option<&str>,
     db_user: Option<&str>,
@@ -396,6 +402,8 @@ fn run_single_project(
 
     tracing::info!(project = name, file_count = audit_files.len(), "开始审核");
 
+    maybe_codeweb_analyze(config, project, codeweb_analyze);
+
     let rt = tokio::runtime::Runtime::new().expect("创建 tokio 运行时失败");
     let (all_findings, degraded, skipped) = rt.block_on(audit_files_async(
         &audit_files,
@@ -407,6 +415,8 @@ fn run_single_project(
         db_user,
         db_password_env,
     ));
+
+    let all_findings = augment_with_impact(all_findings, &audit_files, &config.codeweb, project.codeweb.as_ref());
 
     let all_findings =
         if diff_aware { apply_diff_aware_filter(all_findings, effective_baseline, repo_path) } else { all_findings };
@@ -449,6 +459,64 @@ fn run_single_project(
     }
 }
 
+/// 对已审核文件追加 codeweb 语义影响 findings（优雅降级）。
+///
+/// 仅当 `project_codeweb` 为 `Some` 且 `enabled`、且 codeweb 二进制可用时执行。
+/// 任何失败仅 warn 并跳过，不影响 `findings`。
+fn augment_with_impact(
+    findings: Vec<cr_core::Finding>,
+    audit_files: &[std::path::PathBuf],
+    config_codeweb: &cr_config::CodewebConfig,
+    project_codeweb: Option<&cr_config::CodewebProjectConfig>,
+) -> Vec<cr_core::Finding> {
+    let Some(cw) = project_codeweb.filter(|c| c.enabled) else {
+        return findings;
+    };
+    let runner = cr_audit_impact::CodewebRunner {
+        binary: config_codeweb.binary.as_ref().map(std::path::PathBuf::from),
+        timeout: std::time::Duration::from_secs(config_codeweb.timeout_secs),
+    };
+    if let Err(e) = runner.check_available() {
+        tracing::warn!(error = %e, "codeweb 不可用，跳过 impact 分析");
+        return findings;
+    }
+    let proj_path = std::path::Path::new(&cw.project_path);
+    let scope_count = audit_files
+        .iter()
+        .filter(|f| matches!(f.extension().and_then(|e| e.to_str()), Some("java") | Some("xml") | Some("sql")))
+        .count();
+    tracing::info!(files = scope_count, "codeweb impact 分析启动（逐文件子进程调用，文件多时较慢）");
+    let mut combined = findings;
+    for f in audit_files {
+        let is_codeweb_scope =
+            matches!(f.extension().and_then(|e| e.to_str()), Some("java") | Some("xml") | Some("sql"));
+        if !is_codeweb_scope {
+            continue;
+        }
+        let key = f.to_string_lossy();
+        match runner.query_impact(&key, proj_path) {
+            Ok(impact) => combined.extend(cr_audit_impact::impact_to_findings(&impact, &key)),
+            Err(e) => tracing::warn!(error = %e, file = %key, "codeweb impact 查询失败，跳过该文件"),
+        }
+    }
+    combined
+}
+
+fn maybe_codeweb_analyze(config: &cr_config::Config, project: &cr_config::ProjectConfig, codeweb_analyze: bool) {
+    if !codeweb_analyze {
+        return;
+    }
+    if let Some(cw) = project.codeweb.as_ref().filter(|c| c.enabled) {
+        let runner = cr_audit_impact::CodewebRunner {
+            binary: config.codeweb.binary.as_ref().map(PathBuf::from),
+            timeout: std::time::Duration::from_secs(config.codeweb.timeout_secs),
+        };
+        if let Err(e) = runner.analyze(Path::new(&cw.project_path)) {
+            tracing::warn!(error = %e, "codeweb analyze 建图失败，继续审核");
+        }
+    }
+}
+
 fn run_all_projects(
     config: &cr_config::Config,
     full: bool,
@@ -456,6 +524,7 @@ fn run_all_projects(
     output_path: Option<&std::path::Path>,
     no_db: bool,
     diff_aware: bool,
+    codeweb_analyze: bool,
 ) {
     let mut sections = Vec::new();
 
@@ -478,8 +547,12 @@ fn run_all_projects(
 
         tracing::info!(project = name, file_count = audit_files.len(), "开始审核");
 
+        maybe_codeweb_analyze(config, project, codeweb_analyze);
+
         let (findings, degraded, skipped) =
             rt.block_on(audit_files_async(&audit_files, db_config, &config.rules, no_db, None, None, None, None));
+
+        let findings = augment_with_impact(findings, &audit_files, &config.codeweb, project.codeweb.as_ref());
 
         let findings = if diff_aware { apply_diff_aware_filter(findings, baseline, repo_path) } else { findings };
 
@@ -748,10 +821,76 @@ fn is_explainable_dml(sql: &str) -> bool {
             .unwrap_or("")
             .trim_start_matches(|c: char| !c.is_alphabetic())
             .to_uppercase();
-        return matches!(
-            first_word.as_str(),
-            "SELECT" | "INSERT" | "UPDATE" | "DELETE" | "MERGE" | "WITH"
-        );
+        return matches!(first_word.as_str(), "SELECT" | "INSERT" | "UPDATE" | "DELETE" | "MERGE" | "WITH");
     }
     false
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 从 TOML 构造全局 codeweb 配置。
+    ///
+    /// `CodewebConfig` 标记 `#[non_exhaustive]`，跨 crate 不能用结构体字面量构造，
+    /// 故通过 TOML 反序列化（与真实配置加载路径一致）。
+    fn codeweb_config(binary: Option<&str>, timeout_secs: u64) -> cr_config::CodewebConfig {
+        let mut s = format!("[codeweb]\ntimeout_secs = {timeout_secs}\n");
+        if let Some(b) = binary {
+            s.push_str(&format!("binary = \"{b}\"\n"));
+        }
+        toml::from_str::<cr_config::Config>(&s).unwrap().codeweb
+    }
+
+    /// 从 TOML 构造每项目 codeweb 配置。
+    fn project_codeweb(project_path: &str, enabled: bool) -> cr_config::CodewebProjectConfig {
+        let s = format!(
+            "[projects.test]\ngit_repo = \".\"\n[projects.test.codeweb]\nproject_path = \"{project_path}\"\nenabled = {enabled}\n"
+        );
+        toml::from_str::<cr_config::Config>(&s).unwrap().projects.get("test").unwrap().codeweb.clone().unwrap()
+    }
+
+    #[test]
+    fn test_augment_with_impact_no_config() {
+        let cfg = cr_config::CodewebConfig::default();
+        let out = augment_with_impact(vec![], &[std::path::PathBuf::from("a.sql")], &cfg, None);
+        assert!(out.is_empty(), "无 codeweb 配置时不应产生 finding");
+    }
+
+    #[test]
+    fn test_augment_with_impact_disabled() {
+        let cw = project_codeweb("/tmp", false);
+        let cfg = cr_config::CodewebConfig::default();
+        let out = augment_with_impact(vec![], &[std::path::PathBuf::from("a.java")], &cfg, Some(&cw));
+        assert!(out.is_empty(), "disabled 时不应产生 finding");
+    }
+
+    #[test]
+    fn test_augment_with_impact_binary_not_found() {
+        let cw = project_codeweb("/tmp", true);
+        let cfg = codeweb_config(Some("/nonexistent/codeweb"), 5);
+        let out = augment_with_impact(vec![], &[std::path::PathBuf::from("a.java")], &cfg, Some(&cw));
+        assert!(out.is_empty(), "codeweb 二进制不存在时应优雅返回原始 findings");
+    }
+
+    #[test]
+    fn test_augment_with_impact_preserves_existing() {
+        let existing = vec![cr_core::Finding::new(
+            "TEST-001",
+            cr_core::Severity::Info,
+            cr_core::DiagnosticCategory::General,
+            "test",
+            "existing finding",
+            "a.java",
+            None,
+            None,
+            None,
+            None,
+        )];
+        let cw = project_codeweb("/tmp", true);
+        let cfg = codeweb_config(Some("/nonexistent/codeweb"), 5);
+        let out = augment_with_impact(existing, &[std::path::PathBuf::from("a.java")], &cfg, Some(&cw));
+        assert_eq!(out.len(), 1, "二进制不可用时应保留原始 findings");
+        assert_eq!(out[0].rule_id, "TEST-001");
+    }
 }

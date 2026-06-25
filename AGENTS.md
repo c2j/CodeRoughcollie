@@ -14,7 +14,7 @@ CodeRoughcollie 仓库的 AI Agent 与人类协作约定。
 | `lib/ogexplain-analyzer` | https://github.com/c2j/ogexplain-analyzer | EXPLAIN 计划分析、复杂度评估 |
 | `lib/metamorphosis` | https://github.com/c2j/metamorphosis | SQL 重写规则引擎 |
 | `lib/rust-opengauss` | https://github.com/c2j/rust-opengauss | openGauss/GaussDB Rust 驱动（`gaussdb` facade + `tokio-opengauss`） |
-| `lib/codeweb` | https://github.com/c2j/codeweb | Web 渲染 |
+| `lib/codeweb` | https://github.com/c2j/codeweb | 语义代码图谱分析器（Java/Mapper/SQL/存储过程 调用链 + 增量与影响分析） |
 | `lib/astgrep` | https://github.com/c2j/astgrep | AST grep 引擎 |
 | `lib/cr-rules` | git@github.com:c2j/cr-rules.git | 审核规则集 |
 

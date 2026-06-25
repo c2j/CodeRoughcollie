@@ -39,12 +39,7 @@ fn status_mark(ok: bool) -> &'static str {
 
 async fn tcp_probe(host: &str, port: u16) -> Result<Duration, String> {
     let start = Instant::now();
-    match tokio::time::timeout(
-        Duration::from_secs(3),
-        tokio::net::TcpStream::connect((host, port)),
-    )
-    .await
-    {
+    match tokio::time::timeout(Duration::from_secs(3), tokio::net::TcpStream::connect((host, port))).await {
         Ok(Ok(_stream)) => Ok(start.elapsed()),
         Ok(Err(e)) => Err(e.to_string()),
         Err(_) => Err("timeout after 3s".to_string()),
@@ -58,11 +53,7 @@ async fn query_scalar(client: &Client, sql: &str) -> Option<String> {
     }
 }
 
-pub(crate) fn run_doctor(
-    config_path: Option<&std::path::Path>,
-    db_filter: Option<&str>,
-    verbose: bool,
-) -> i32 {
+pub(crate) fn run_doctor(config_path: Option<&std::path::Path>, db_filter: Option<&str>, verbose: bool) -> i32 {
     let path = config_path.unwrap_or_else(|| std::path::Path::new(".roughcollie.toml"));
     let config = match cr_config::Config::load_from_file(path) {
         Ok(c) => c,
@@ -82,11 +73,7 @@ pub(crate) fn run_doctor(
             }
         }
     } else {
-        config
-            .databases
-            .iter()
-            .map(|(k, v)| (k.as_str(), v))
-            .collect()
+        config.databases.iter().map(|(k, v)| (k.as_str(), v)).collect()
     };
 
     let total = databases.len();
@@ -136,22 +123,12 @@ pub(crate) fn run_doctor(
         }
 
         let password = resolve_password(db);
-        let conn_result = rt.block_on(cr_db::GaussDbConnection::connect(
-            &db.host,
-            db.port,
-            &db.database,
-            &db.username,
-            &password,
-        ));
+        let conn_result =
+            rt.block_on(cr_db::GaussDbConnection::connect(&db.host, db.port, &db.database, &db.username, &password));
 
         match conn_result {
             Ok(conn) => {
-                eprintln!(
-                    "  Auth:              {} connected as {}@{}",
-                    status_mark(true),
-                    db.username,
-                    db.database
-                );
+                eprintln!("  Auth:              {} connected as {}@{}", status_mark(true), db.username, db.database);
                 healthy += 1;
 
                 if verbose {
@@ -188,7 +165,11 @@ pub(crate) fn run_doctor(
     }
 
     eprintln!("Summary: {healthy}/{total} healthy");
-    if healthy == total { 0 } else { 1 }
+    if healthy == total {
+        0
+    } else {
+        1
+    }
 }
 
 #[cfg(test)]

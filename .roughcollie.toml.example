@@ -64,3 +64,12 @@ format = "markdown"
 path = "./audit-report.md"
 exit_code_on_critical = 1
 exit_code_on_warning = 0
+
+# [codeweb] 段（三期，可选）：语义影响分析，子进程调用 codeweb
+[codeweb]
+# binary = "/usr/local/bin/codeweb"   # 缺省从 PATH 查找
+timeout_secs = 120
+
+# [projects.demo.codeweb]
+# project_path = "/srv/demo"          # codeweb 项目目录（含 codeweb.toml）
+# enabled = true                      # opt-in

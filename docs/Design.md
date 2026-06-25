@@ -101,7 +101,7 @@ CodeRoughcollie/
 │   │   │   └── lib.rs                 # 调用 ogsql-complexity::analyze / gauss_analyze
 │   │   └── Cargo.toml
 │   │
-│   ├── cr-audit-impact/               # 语义影响分析（预留，三期集成 codeweb）
+│   ├── cr-audit-impact/               # 语义影响分析（子进程调用 codeweb，三期）
 │   │   ├── src/
 │   │   │   └── lib.rs
 │   │   └── Cargo.toml
@@ -193,7 +193,7 @@ CodeRoughcollie
     ├─► ogsql-complexity ──────┤── analyze() / gauss_analyze() 复杂度评分
     ├─► rust-opengauss ────────┤── 预置连接，真实 EXPLAIN
     ├─► astgrep ───────────────┤── 安全规则（Java + SQL）
-    ├─► codeweb ───────────────┤── 影响分析（三期）
+    ├─► codeweb ───────────────┤── 语义影响分析（子进程调用，三期）
     └─► rmcp ──────────────────┘── MCP Server SDK（三期）
 ```
 
@@ -1202,7 +1202,7 @@ chore(deps): update rust-opengauss to 0.4
 
 | 周 | 模块 | 任务 | 产出 |
 |----|------|------|------|
-| 17-18 | 影响分析 | 集成 `codeweb` HTTP API，变更 Java/Mapper 时查询上下游调用链 | 输出 `IMPACT` 类型 Finding |
+| 17-18 | 影响分析 | 子进程调用 `codeweb` CLI（`codeweb impact --file`），变更 Java/Mapper 时查询上下游调用链 | 输出 `IMPACT` 类型 Finding |
 | 19-20 | MCP Server | `cr-mcp-server` crate：基于 `rmcp` v0.16，暴露 5 个工具（audit_files / explain_sql / list_rules / compare_baseline / suggest_fix） | AI 助手（Claude/Cursor）可直接调用审核 |
 | 21-22 | 插件系统 | `cr-plugin` crate: C ABI 封装层（`libloading` + `catch_unwind`）、版本协商、规则注册表 | 企业可通过 `.so` 插件增加自定义规则 |
 | 23-24 | SARIF + 自动修复 | SARIF 输出（兼容 GitHub Advanced Security）、对接 `metamorphosis` 生成补丁建议 | 平台集成与自动修复原型 |
