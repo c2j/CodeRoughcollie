@@ -76,15 +76,19 @@ git commit -m "chore(submodule): bump <name> to <new-short-sha>"
 - 英文 commit message
 - 一次 commit 只做一件事;多文件改动按目录/关注点拆分
 
-### 验证命令
+### 提交前检查项（CI 强制门禁）
 
-发布/合并前必须全部通过:
+每次提交/推送前**必须**本地通过以下全部检查。CI（`.github/workflows/ci.yml`）在 push 时执行相同的 fmt/clippy/test 门禁，任一失败即阻断合并:
 
 ```bash
 cargo fmt --all -- --check
 cargo clippy --workspace -- -D warnings
 cargo test --workspace
 ```
+
+> **格式检查覆盖全部 crate**:`cargo fmt --all` 对 workspace 的**每一个**成员跑 fmt。即便本次只改一个 crate,历史格式债务（如某 crate 上一处 `pub use` 顺序）也会让 CI 红灯。养成提交前 `cargo fmt --all` 的习惯,不要只格式化当前改动文件。
+>
+> **Release 交叉编译**:`.github/workflows/release.yml` 用 `cargo zigbuild -p cr-cli` 只构建 coderc 二进制,避免拉入其他 workspace 成员的系统 OpenSSL 依赖（交叉编译环境无 libssl）。修改构建范围时务必保持 `-p cr-cli` 限定。
 
 ### 详细文档
 
