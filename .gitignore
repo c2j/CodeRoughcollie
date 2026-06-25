@@ -2,3 +2,8 @@
 **/*.rs.bk
 *.pdb
 .DS_Store
+
+# 用户配置（含密码，不应入库）
+.roughcollie.toml
+
+testcases/c2j/ogagila/

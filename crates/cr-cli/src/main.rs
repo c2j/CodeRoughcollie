@@ -4,6 +4,7 @@ use clap::{Parser, Subcommand};
 
 use encoding_rs::Encoding;
 
+mod doctor;
 mod manifest;
 
 /// CodeRoughcollie — GaussDB/openGauss 代码审核工具。
@@ -15,6 +16,7 @@ struct Cli {
 }
 
 #[derive(Subcommand)]
+#[allow(clippy::large_enum_variant)]
 enum Commands {
     /// 执行代码审核。
     Audit {
@@ -89,6 +91,21 @@ enum Commands {
         #[arg(long)]
         db_password_env: Option<String>,
     },
+    /// 诊断数据库连通性（TCP / 认证 / 服务端信息）。
+    #[command(alias = "db-check")]
+    Doctor {
+        /// 配置文件路径（缺省为 .roughcollie.toml）。
+        #[arg(long)]
+        config: Option<PathBuf>,
+
+        /// 仅诊断指定数据库（缺省则诊断全部启用的数据库）。
+        #[arg(long)]
+        db: Option<String>,
+
+        /// 显示服务端版本、GUC 参数等详细信息。
+        #[arg(short, long)]
+        verbose: bool,
+    },
 }
 
 fn main() {
@@ -101,23 +118,71 @@ fn main() {
 
     let cli = Cli::parse();
 
-    let Commands::Audit {
-        config: config_path,
-        project,
-        full,
-        baseline,
-        files,
-        dir,
-        manifest,
-        output_format,
-        output_path,
-        no_db,
-        diff_aware,
-        db_host,
-        db_name,
-        db_user,
-        db_password_env,
-    } = cli.command;
+    match cli.command {
+        Commands::Audit {
+            config: config_path,
+            project,
+            full,
+            baseline,
+            files,
+            dir,
+            manifest,
+            output_format,
+            output_path,
+            no_db,
+            diff_aware,
+            db_host,
+            db_name,
+            db_user,
+            db_password_env,
+        } => {
+            run_audit(
+                config_path,
+                project,
+                full,
+                baseline,
+                files,
+                dir,
+                manifest,
+                output_format,
+                output_path,
+                no_db,
+                diff_aware,
+                db_host,
+                db_name,
+                db_user,
+                db_password_env,
+            )
+        }
+        Commands::Doctor {
+            config,
+            db,
+            verbose,
+        } => {
+            let code = doctor::run_doctor(config.as_deref(), db.as_deref(), verbose);
+            std::process::exit(code);
+        }
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn run_audit(
+    config_path: Option<PathBuf>,
+    project: Option<String>,
+    full: bool,
+    baseline: Option<String>,
+    files: Vec<PathBuf>,
+    dir: Vec<PathBuf>,
+    manifest: Option<PathBuf>,
+    output_format: String,
+    output_path: Option<PathBuf>,
+    no_db: bool,
+    diff_aware: bool,
+    db_host: Option<String>,
+    db_name: Option<String>,
+    db_user: Option<String>,
+    db_password_env: Option<String>,
+) {
 
     let config = load_config(config_path.as_deref());
     if let Err(e) = config.validate() {
@@ -511,6 +576,7 @@ pub(crate) async fn audit_files_async(
             let password = db_password_env
                 .and_then(|env_var| std::env::var(env_var).ok())
                 .or_else(|| db.password_env.as_ref().and_then(|env_var| std::env::var(env_var).ok()))
+                .or_else(|| db.password.clone())
                 .unwrap_or_default();
 
             tracing::info!(host = host, db = database, "连接 GaussDB 中");
@@ -642,20 +708,50 @@ async fn audit_sql_file(
     ));
 
     if let Some(conn) = db_conn {
-        tracing::debug!("EXPLAIN 审核中");
-        let timeout = db_config.map(|d| d.explain.timeout_seconds).unwrap_or(30);
-        match cr_db::execute_explain(conn.client(), sql, timeout).await {
-            Ok(explain_text) => match cr_audit_explain::analyze_explain_text(&explain_text, "inline") {
-                Ok(explain_findings) => findings.extend(explain_findings),
+        if !is_explainable_dml(sql) {
+            tracing::debug!("跳过 EXPLAIN（非 DML 语句：CREATE/ALTER/DROP/SET/TRIGGER/...）");
+        } else {
+            tracing::debug!("EXPLAIN 审核中");
+            let timeout = db_config.map(|d| d.explain.timeout_seconds).unwrap_or(30);
+            match cr_db::execute_explain(conn.client(), sql, timeout).await {
+                Ok(explain_text) => match cr_audit_explain::analyze_explain_text(&explain_text, "inline") {
+                    Ok(explain_findings) => findings.extend(explain_findings),
+                    Err(e) => {
+                        tracing::warn!(error = %e, "EXPLAIN 解析失败，跳过执行计划审核");
+                    }
+                },
                 Err(e) => {
-                    tracing::warn!(error = %e, "EXPLAIN 解析失败，跳过执行计划审核");
+                    tracing::warn!(error = %e, "EXPLAIN 执行失败，该 SQL 仅静态审核");
                 }
-            },
-            Err(e) => {
-                tracing::warn!(error = %e, "EXPLAIN 执行失败，该 SQL 仅静态审核");
             }
         }
     }
 
     findings
+}
+
+fn is_explainable_dml(sql: &str) -> bool {
+    for raw_line in sql.lines() {
+        let trimmed = raw_line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        if trimmed.starts_with("--") {
+            continue;
+        }
+        if trimmed.starts_with("/*") {
+            continue;
+        }
+        let first_word = trimmed
+            .split_whitespace()
+            .next()
+            .unwrap_or("")
+            .trim_start_matches(|c: char| !c.is_alphabetic())
+            .to_uppercase();
+        return matches!(
+            first_word.as_str(),
+            "SELECT" | "INSERT" | "UPDATE" | "DELETE" | "MERGE" | "WITH"
+        );
+    }
+    false
 }

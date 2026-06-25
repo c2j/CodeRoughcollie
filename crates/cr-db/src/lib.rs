@@ -1,7 +1,7 @@
 //! GaussDB / openGauss database connection layer for CodeRoughcollie.
 //!
 //! Provides connection management, EXPLAIN execution, and permission
-//! validation by wrapping `tokio_opengauss`.
+//! validation by wrapping `gaussdb`.
 
 pub mod connection;
 pub mod explain_executor;
@@ -11,6 +11,7 @@ pub mod pool;
 pub mod security;
 
 pub use connection::GaussDbConnection;
+pub use connection::full_error_chain;
 pub use explain_executor::execute_explain;
 pub use placeholder::{fill_placeholders, has_placeholders};
 pub use security::validate_readonly;

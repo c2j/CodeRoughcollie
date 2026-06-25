@@ -1,8 +1,10 @@
 //! Permission validation for EXPLAIN-only database access.
 
-use tokio_opengauss::{Client, SimpleQueryMessage};
+use gaussdb::{Client, SimpleQueryMessage};
 
 use cr_core::DbError;
+
+use crate::connection::full_error_chain;
 
 /// Validates that the connection is usable for read-only queries.
 ///
@@ -24,7 +26,7 @@ async fn current_user(client: &Client) -> Result<String, DbError> {
     let messages = client.simple_query("SELECT current_user").await.map_err(|e| DbError::ConnectionFailed {
         host: String::new(),
         port: 0,
-        reason: format!("Failed to query current user: {e}"),
+        reason: format!("Failed to query current user: {}", full_error_chain(&e)),
     })?;
 
     let user = messages
@@ -39,7 +41,7 @@ async fn verify_connection(client: &Client, user: &str) -> Result<(), DbError> {
     let messages = client.simple_query("SELECT 1").await.map_err(|e| DbError::ConnectionFailed {
         host: String::new(),
         port: 0,
-        reason: format!("Connection validation failed: {e}"),
+        reason: format!("Connection validation failed: {}", full_error_chain(&e)),
     })?;
 
     let ok = messages.iter().any(|msg| matches!(msg, SimpleQueryMessage::Row(_)));

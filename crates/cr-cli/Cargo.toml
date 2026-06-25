@@ -19,6 +19,7 @@ cr-audit-complexity = { workspace = true }
 cr-config = { workspace = true }
 cr-db = { workspace = true }
 cr-git = { workspace = true }
+gaussdb = { workspace = true }
 clap = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }

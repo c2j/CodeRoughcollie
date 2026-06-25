@@ -1,11 +1,11 @@
 //! GaussDB connection management.
 //!
-//! Provides [`GaussDbConnection`], which wraps a `tokio_opengauss::Client`
+//! Provides [`GaussDbConnection`], which wraps a `gaussdb::Client`
 //! and implements the [`cr_core::DbConnection`] trait.
 
 use std::time::Duration;
 
-use tokio_opengauss::{Client, Config, NoTls};
+use gaussdb::{Client, Config, NoTls};
 
 use cr_core::DbError;
 
@@ -17,7 +17,7 @@ const DEFAULT_EXPLAIN_TIMEOUT_SECS: u64 = 30;
 
 /// A connection to a GaussDB / openGauss database.
 ///
-/// Wraps a [`tokio_opengauss::Client`] and stores connection metadata
+/// Wraps a [`gaussdb::Client`] and stores connection metadata
 /// for error reporting.
 #[derive(Debug)]
 pub struct GaussDbConnection {
@@ -58,13 +58,13 @@ impl GaussDbConnection {
         let (client, connection) = config.connect(NoTls).await.map_err(|e| DbError::ConnectionFailed {
             host: host_owned.clone(),
             port,
-            reason: e.to_string(),
+            reason: full_error_chain(&e),
         })?;
 
         // The connection future must be spawned to drive protocol communication.
         tokio::spawn(async move {
             if let Err(e) = connection.await {
-                tracing::error!(%e, "GaussDB connection handler terminated");
+                tracing::error!(error = full_error_chain(&e), "GaussDB connection handler terminated");
             }
         });
 
@@ -95,5 +95,86 @@ impl GaussDbConnection {
     /// Returns the database user name.
     pub fn user(&self) -> &str {
         &self.user
+    }
+}
+
+/// Walks the full [`std::error::Error`] source chain and returns a
+/// colon-separated string like `"db error: FATAL: Invalid username/password"`.
+///
+/// The top-level error's `Display` text appears first, followed by each
+/// source error in order. This is particularly useful for [`gaussdb::Error`]
+/// whose `Display` only produces `"db error"` for the `Db` variant, hiding
+/// the underlying server message in the [`gaussdb::error::DbError`] source.
+pub fn full_error_chain(e: &dyn std::error::Error) -> String {
+    let mut s = e.to_string();
+    let mut src = e.source();
+    while let Some(cause) = src {
+        s.push_str(": ");
+        s.push_str(&cause.to_string());
+        src = cause.source();
+    }
+    s
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::error::Error;
+
+    /// A leaf error with no source.
+    #[derive(Debug)]
+    struct TestError(&'static str);
+
+    impl std::fmt::Display for TestError {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            write!(f, "{}", self.0)
+        }
+    }
+
+    impl Error for TestError {
+        fn source(&self) -> Option<&(dyn Error + 'static)> {
+            None
+        }
+    }
+
+    /// An error that wraps another error as its source.
+    #[derive(Debug)]
+    struct WrapperError {
+        msg: &'static str,
+        source: Box<dyn Error + 'static>,
+    }
+
+    impl std::fmt::Display for WrapperError {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            write!(f, "{}", self.msg)
+        }
+    }
+
+    impl Error for WrapperError {
+        fn source(&self) -> Option<&(dyn Error + 'static)> {
+            Some(&*self.source)
+        }
+    }
+
+    #[test]
+    fn test_full_error_chain_three_levels() {
+        let inner = TestError("inner error");
+        let mid = WrapperError { msg: "middle error", source: Box::new(inner) };
+        let outer = WrapperError { msg: "outer error", source: Box::new(mid) };
+
+        let chain = full_error_chain(&outer);
+        assert_eq!(chain, "outer error: middle error: inner error");
+    }
+
+    #[test]
+    fn test_full_error_chain_single() {
+        let single = TestError("just me");
+        assert_eq!(full_error_chain(&single), "just me");
+    }
+
+    #[test]
+    fn test_full_error_chain_empty_message() {
+        let empty = TestError("");
+        assert_eq!(full_error_chain(&empty), "");
     }
 }
