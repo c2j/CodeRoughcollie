@@ -11,8 +11,10 @@ pub mod java_security;
 pub mod rewrite;
 pub mod rule_metadata;
 pub mod sql_antipattern;
+pub mod validation;
 
 pub use astgrep_runner::{audit_files as audit_files_with_astgrep, AstgrepError, AstgrepOptions};
 pub use file_type::{detect, FileKind};
 pub use java_security::{audit_java_source, audit_mybatis_xml, audit_security};
 pub use sql_antipattern::audit_sql;
+pub use validation::{parser_errors_to_findings, sql_warnings_to_findings, validate_statements};
