@@ -97,8 +97,12 @@ pub fn analyze_explain_with_config(
 /// 将 ogexplain-core 的发现转换为 cr-core 统一发现。
 ///
 /// 映射规则：
-/// - `rule_id`、`title`、`detail`、`node_line`、`node_type`、`suggestion` 直接复制
+/// - `rule_id`、`title`、`detail`、`node_type`、`suggestion` 直接复制
 /// - `severity` / `category` 通过枚举变体一一映射
+/// - `node_line` 置为 `None`：ogexplain-core 的 `node_line` 是 EXPLAIN 计划文本内的行号，
+///   不是源 SQL 文件行号。cr-core 的 `node_line` 被 Markdown/SARIF/CSV 消费者统一当作
+///   "源码行号"展示，塞入计划行号会误导用户去源文件错误的位置查找。计划节点类型已由
+///   `node_type` 字段保留（如 "Seq Scan" / "Hash Join"）。
 /// - `sql_rewrite`、`evidence` 暂不纳入 cr-core 发现（保留扩展空间）
 fn convert_finding(f: ogexplain_core::analyzer::Finding, file_path: &str) -> cr_core::Finding {
     cr_core::Finding::new(
@@ -109,7 +113,7 @@ fn convert_finding(f: ogexplain_core::analyzer::Finding, file_path: &str) -> cr_
         f.detail,
         file_path,
         None,
-        f.node_line,
+        None,
         f.node_type,
         f.suggestion,
     )
@@ -209,5 +213,22 @@ Seq Scan on public.orders  (cost=0.00..48231.50 rows=5000000 width=244)
     fn test_parse_error_returns_error() {
         let result = analyze_explain_text("", "test");
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_explain_finding_node_line_is_none() {
+        let explain = "\
+Seq Scan on public.orders  (cost=0.00..48231.50 rows=5000000 width=244)
+  Filter: (create_time > '2024-01-01 00:00:00'::timestamp without time zone)
+  Rows Removed by Filter: 4990000";
+        let findings = analyze_explain_text(explain, "src/orders.sql").expect("should parse");
+        assert!(
+            findings.iter().all(|f| f.node_line.is_none()),
+            "EXPLAIN findings must not carry plan-text line as node_line, got: {findings:?}"
+        );
+        assert!(
+            findings.iter().all(|f| f.file_path == "src/orders.sql"),
+            "EXPLAIN findings must carry the real file_path"
+        );
     }
 }
