@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 /// 按清单文件（CSV）逐条执行审核。清单解析失败时 `exit(2)`，Critical 发现时 `exit(1)`。
@@ -24,6 +25,9 @@ pub fn run_manifest(
     tracing::info!(entries = entries.len(), "清单已加载，开始审核");
     let rt = tokio::runtime::Runtime::new().expect("创建 tokio 运行时失败");
     let mut sections = Vec::new();
+    // 跟踪每个仓库当前 checkout 的分支：仅在分支变化时才同步，保证交叉分支序（X/Y/X）下正确切换。
+    let mut repo_branch: HashMap<String, String> = HashMap::new();
+    let mut deduped_count: usize = 0;
     for entry in &entries {
         let Some(project) = config.projects.get(&entry.project) else {
             let available: Vec<&str> = config.projects.keys().map(String::as_str).collect();
@@ -31,11 +35,19 @@ pub fn run_manifest(
             continue;
         };
         let repo_path = Path::new(project.git_repo.as_deref().unwrap_or("."));
-        if let Err(e) = cr_git::sync_branch(&entry.branch, repo_path) {
-            tracing::error!(project = %entry.project, branch = %entry.branch, error = %e, "git 同步失败，跳过该清单条目");
-            continue;
+        let repo_key = repo_path.display().to_string();
+        let need_sync = repo_branch.get(&repo_key) != Some(&entry.branch);
+        if need_sync {
+            if let Err(e) = cr_git::sync_branch(&entry.branch, repo_path) {
+                tracing::error!(project = %entry.project, branch = %entry.branch, error = %e, "git 同步失败，跳过该清单条目");
+                continue;
+            }
+            repo_branch.insert(repo_key, entry.branch.clone());
+            tracing::info!(project = %entry.project, branch = %entry.branch, "已同步分支");
+        } else {
+            deduped_count += 1;
+            tracing::debug!(project = %entry.project, branch = %entry.branch, "分支已同步，跳过重复同步");
         }
-        tracing::info!(project = %entry.project, branch = %entry.branch, "已同步分支");
         let audit_files: Vec<PathBuf> =
             entry.files.iter().map(|f| if f.is_absolute() { f.clone() } else { repo_path.join(f) }).collect();
         let db_config = project.database.as_ref().and_then(|n| config.databases.get(n));
@@ -61,6 +73,9 @@ pub fn run_manifest(
         )
         .with_skipped_files(skipped);
         sections.push(cr_report::ProjectSection { name: format!("{}@{}", entry.project, entry.branch), ctx });
+    }
+    if deduped_count > 0 {
+        tracing::info!(deduped = deduped_count, "跳过了重复的分支同步");
     }
     let multi_ctx = cr_report::MultiProjectContext { sections };
     let report = cr_report::render_multi(&multi_ctx, format);
