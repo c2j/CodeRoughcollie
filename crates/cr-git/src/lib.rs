@@ -145,7 +145,11 @@ pub fn validate_baseline(baseline: &str, repo_path: &Path) -> Result<(), std::io
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(std::io::Error::other(format!("无效的 baseline 分支: {baseline}: {stderr}")));
+        let stderr = stderr.trim_end();
+        return Err(std::io::Error::other(format!(
+            "无效的 baseline 分支 '{baseline}': {stderr}。请确认该分支在本地存在 \
+             (git branch --list '{baseline}')，或改用远程跟踪分支如 'origin/{baseline}'，或先执行 git fetch"
+        )));
     }
 
     Ok(())
