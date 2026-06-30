@@ -46,7 +46,14 @@ pub fn rewrite_sql(sql: &str, cr_rule_id: &str) -> Result<String, String> {
 
     let config = RewriteConfig { enabled_rules: HashSet::from([m_rule_id.to_string()]), ..Default::default() };
 
-    let ctx = RewriteContext { version: None, schema: None, config: &config, source_file: None, known_variables: None };
+    let ctx = RewriteContext {
+        version: None,
+        schema: None,
+        config: &config,
+        source_file: None,
+        known_variables: None,
+        diagnostic_hints: None,
+    };
 
     let stmts: Vec<_> = stmt_infos.into_iter().map(|si| si.statement).collect();
     let result = engine.rewrite(&ctx, stmts);
@@ -80,7 +87,14 @@ pub fn get_suggestions(sql: &str) -> Vec<(String, String)> {
     let engine = RewriteEngine::new(registry);
 
     let config = RewriteConfig::default();
-    let ctx = RewriteContext { version: None, schema: None, config: &config, source_file: None, known_variables: None };
+    let ctx = RewriteContext {
+        version: None,
+        schema: None,
+        config: &config,
+        source_file: None,
+        known_variables: None,
+        diagnostic_hints: None,
+    };
 
     let stmts: Vec<_> = stmt_infos.into_iter().map(|si| si.statement).collect();
     let result = engine.rewrite(&ctx, stmts);
