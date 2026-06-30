@@ -94,7 +94,7 @@ pub fn audit_complexity(
                 ),
                 file_path,
                 None,
-                None,
+                Some(1),
                 None,
                 None,
             ));
@@ -109,7 +109,7 @@ pub fn audit_complexity(
                 ),
                 file_path,
                 None,
-                None,
+                Some(1),
                 None,
                 None,
             ));
@@ -123,7 +123,7 @@ pub fn audit_complexity(
             format!("SQL 复杂度评分为 {score:.1}，超过高复杂度阈值 66，建议优化"),
             file_path,
             None,
-            None,
+            Some(1),
             None,
             None,
         ));
@@ -182,5 +182,26 @@ mod tests {
         let sql = "SELECT * FROM t1";
         let findings = audit_complexity(sql, "test.sql", Some(5.0), 10.0, 20.0);
         assert!(findings.is_empty(), "small delta should have no findings");
+    }
+
+    #[test]
+    fn complexity_finding_has_source_line() {
+        let sql = "SELECT * FROM t1 JOIN t2 USING(id) JOIN t3 USING(id) ORDER BY t1.a";
+        let findings = audit_complexity(sql, "test.sql", None, 10.0, 20.0);
+        let f = findings.iter().find(|f| f.rule_id == "COMPLEX-002");
+        if let Some(f) = f {
+            assert_eq!(f.node_line, Some(1), "complexity finding should point to SQL start line");
+        }
+    }
+
+    #[test]
+    fn complexity_baseline_finding_has_source_line() {
+        let sql = "SELECT * FROM t1 JOIN t2 USING(id) JOIN t3 USING(id) ORDER BY t1.a";
+        let findings = audit_complexity(sql, "test.sql", Some(0.0), 10.0, 20.0);
+        if let Some(f) =
+            findings.iter().find(|f| f.rule_id == "COMPLEX-001" && f.severity == cr_core::Severity::Critical)
+        {
+            assert_eq!(f.node_line, Some(1));
+        }
     }
 }

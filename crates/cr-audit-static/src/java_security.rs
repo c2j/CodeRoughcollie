@@ -18,6 +18,18 @@ fn line_number(content: &str, byte_offset: usize) -> Option<usize> {
     Some(content[..byte_offset].matches('\n').count() + 1)
 }
 
+/// 将 findings 的 `node_line` 加上 `offset`，用于把"相对于 SQL 片段"的行号修正为"相对于源文件"的行号。
+fn offset_finding_lines(findings: &mut [Finding], offset: usize) {
+    if offset == 0 {
+        return;
+    }
+    for f in findings.iter_mut() {
+        if let Some(line) = f.node_line {
+            f.node_line = Some(line + offset);
+        }
+    }
+}
+
 pub fn audit_mybatis_xml(xml_content: &str, file_path: &str) -> Vec<Finding> {
     let mut findings = Vec::new();
     let dollar_re = match Regex::new(r#"\$\{[^}]*\}"#) {
@@ -44,8 +56,14 @@ pub fn audit_mybatis_xml(xml_content: &str, file_path: &str) -> Vec<Finding> {
     let parsed = ogsql_parser::ibatis::parse_mapper_bytes_with_path(xml_content.as_bytes(), Some(file_path));
     for stmt in &parsed.statements {
         if let Some((stmt_infos, parse_errors)) = &stmt.parse_result {
-            findings.extend(crate::validation::parser_errors_to_findings(parse_errors, file_path));
-            findings.extend(crate::validation::validate_statements(stmt_infos, file_path));
+            // parse_result 由解析 flat_sql（抽取出的 SQL 片段）生成，行号相对于 SQL 片段
+            // 而非 XML 文件。用 stmt.line（<select> 等元素在 XML 中的行号）做偏移修正，
+            // 使行号指向 XML 文件中的大致位置。
+            let line_offset = stmt.line.saturating_sub(1);
+            let mut sql_findings = crate::validation::parser_errors_to_findings(parse_errors, file_path);
+            sql_findings.extend(crate::validation::validate_statements(stmt_infos, file_path));
+            offset_finding_lines(&mut sql_findings, line_offset);
+            findings.extend(sql_findings);
         }
     }
 
@@ -83,8 +101,12 @@ pub fn audit_java_source(java_content: &str, file_path: &str) -> Vec<Finding> {
     let result = ogsql_parser::java::extract_sql_from_java(java_content, file_path, &config);
     for ext in &result.extractions {
         if let Some(pr) = &ext.parse_result {
-            findings.extend(crate::validation::parser_errors_to_findings(&pr.errors, file_path));
-            findings.extend(crate::validation::validate_statements(&pr.statements, file_path));
+            // parse_result 行号相对于抽取出的 SQL 字符串，用 ext.origin.line（Java 源码行）做偏移修正
+            let line_offset = ext.origin.line.saturating_sub(1);
+            let mut sql_findings = crate::validation::parser_errors_to_findings(&pr.errors, file_path);
+            sql_findings.extend(crate::validation::validate_statements(&pr.statements, file_path));
+            offset_finding_lines(&mut sql_findings, line_offset);
+            findings.extend(sql_findings);
         }
     }
 
@@ -175,5 +197,29 @@ mod tests {
             findings.iter().any(|f| f.rule_id.starts_with("PARSE-")),
             "syntax error in Java annotation SQL should produce PARSE-* findings, got: {findings:?}"
         );
+    }
+
+    #[test]
+    fn test_mybatis_xml_line_offset_multiline() {
+        let xml = "<mapper namespace=\"t\">\n  <select id=\"bad\">\n    SELECT FROM WHERE\n  </select>\n</mapper>";
+        let findings = audit_mybatis_xml(xml, "mapper.xml");
+        let parse_findings: Vec<_> = findings.iter().filter(|f| f.rule_id.starts_with("PARSE-")).collect();
+        assert!(!parse_findings.is_empty(), "should have PARSE-* findings");
+        for f in &parse_findings {
+            let line = f.node_line.expect("PARSE finding should have a line number");
+            assert!(line >= 3, "PARSE finding in multi-line XML should point to XML line ~3, got line {line}");
+        }
+    }
+
+    #[test]
+    fn test_java_source_line_offset() {
+        let java = "\npackage com.example;\npublic interface UserMapper {\n    @Select(\"SELECT FROM WHERE\")\n    User bad();\n}\n";
+        let findings = audit_java_source(java, "UserMapper.java");
+        let parse_findings: Vec<_> = findings.iter().filter(|f| f.rule_id.starts_with("PARSE-")).collect();
+        assert!(!parse_findings.is_empty(), "should have PARSE-* findings");
+        for f in &parse_findings {
+            let line = f.node_line.expect("PARSE finding should have a line number");
+            assert!(line >= 4, "PARSE finding in Java should point to @Select line ~4, got line {line}");
+        }
     }
 }
