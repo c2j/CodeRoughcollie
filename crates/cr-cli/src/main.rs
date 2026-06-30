@@ -506,14 +506,26 @@ fn maybe_codeweb_analyze(config: &cr_config::Config, project: &cr_config::Projec
     if !codeweb_analyze {
         return;
     }
-    if let Some(cw) = project.codeweb.as_ref().filter(|c| c.enabled) {
-        let runner = cr_audit_impact::CodewebRunner {
-            binary: config.codeweb.binary.as_ref().map(PathBuf::from),
-            timeout: std::time::Duration::from_secs(config.codeweb.timeout_secs),
-        };
-        if let Err(e) = runner.analyze(Path::new(&cw.project_path)) {
-            tracing::warn!(error = %e, "codeweb analyze 建图失败，继续审核");
-        }
+    let Some(cw) = project.codeweb.as_ref() else {
+        tracing::warn!(
+            "--codeweb-analyze 已传入，但项目未配置 [projects.<name>.codeweb] 段，跳过建图。\
+             如需启用，请在配置文件中为该项目添加 [projects.<name>.codeweb] 并设置 project_path 与 enabled = true"
+        );
+        return;
+    };
+    if !cw.enabled {
+        tracing::warn!(
+            "--codeweb-analyze 已传入，但项目 codeweb.enabled = false，跳过建图。\
+             如需启用，请将 [projects.<name>.codeweb] 的 enabled 设为 true"
+        );
+        return;
+    }
+    let runner = cr_audit_impact::CodewebRunner {
+        binary: config.codeweb.binary.as_ref().map(PathBuf::from),
+        timeout: std::time::Duration::from_secs(config.codeweb.timeout_secs),
+    };
+    if let Err(e) = runner.analyze(Path::new(&cw.project_path)) {
+        tracing::warn!(error = %e, "codeweb analyze 建图失败，继续审核");
     }
 }
 
