@@ -402,7 +402,8 @@ fn run_single_project(
     let full_dirs: Vec<PathBuf> =
         if full && files.is_empty() && dirs.is_empty() { vec![repo_path.to_path_buf()] } else { Vec::new() };
     let effective_dirs: Vec<PathBuf> = if dirs.is_empty() { full_dirs } else { dirs.to_vec() };
-    let (audit_files, type_filtered) = discover_audit_files(files, &effective_dirs, effective_baseline, repo_path, project.project_type);
+    let (audit_files, type_filtered) =
+        discover_audit_files(files, &effective_dirs, effective_baseline, repo_path, project.project_type);
 
     if type_filtered > 0 {
         tracing::info!(project = name, type_filtered, "文件因 project_type 过滤被跳过");
@@ -563,7 +564,8 @@ fn run_all_projects(
         let db_config = project.database.as_ref().and_then(|n| config.databases.get(n));
 
         let audit_dirs: Vec<PathBuf> = if full { vec![repo_path.to_path_buf()] } else { Vec::new() };
-        let (audit_files, type_filtered) = discover_audit_files(&[], &audit_dirs, baseline, repo_path, project.project_type);
+        let (audit_files, type_filtered) =
+            discover_audit_files(&[], &audit_dirs, baseline, repo_path, project.project_type);
 
         if type_filtered > 0 {
             tracing::info!(project = name, type_filtered, "文件因 project_type 过滤被跳过");
