@@ -1,5 +1,6 @@
 [workspace]
 resolver = "2"
+exclude = ["lib/codeweb"]
 members = [
     "crates/cr-core",
     "crates/cr-db",

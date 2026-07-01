@@ -50,6 +50,23 @@ pub fn run_manifest(
         }
         let audit_files: Vec<PathBuf> =
             entry.files.iter().map(|f| if f.is_absolute() { f.clone() } else { repo_path.join(f) }).collect();
+        // If none of the resolved files exist, check for common misconfiguration:
+        // manifest paths that already include the git_repo prefix, causing double-joining.
+        let all_missing = audit_files.iter().all(|f| !f.exists());
+        if all_missing && !audit_files.is_empty() {
+            let example_resolved = audit_files[0].display().to_string();
+            let repo_str = repo_path.display().to_string();
+            if example_resolved.contains(&format!("{repo_str}/{repo_str}")) {
+                tracing::warn!(
+                    project = %entry.project,
+                    example = %example_resolved,
+                    "清单文件路径解析异常：路径中出现了重复的项目目录前缀。\
+                     清单中的 files 字段应为相对于项目 git_repo（{}）的路径，\
+                     不要包含 git_repo 前缀。",
+                    repo_str,
+                );
+            }
+        }
         let db_config = project.database.as_ref().and_then(|n| config.databases.get(n));
         let (findings, degraded, skipped) = rt.block_on(crate::audit_files_async(
             &audit_files,

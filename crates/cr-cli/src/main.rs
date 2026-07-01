@@ -311,7 +311,7 @@ fn discover_audit_files(
     effective_baseline: Option<&str>,
     repo_path: &Path,
     project_type: Option<cr_config::ProjectType>,
-) -> Vec<PathBuf> {
+) -> (Vec<PathBuf>, usize) {
     let user_explicit_sources = !files.is_empty() || !dirs.is_empty();
 
     if user_explicit_sources {
@@ -328,7 +328,7 @@ fn discover_audit_files(
         }
         audit_files.sort();
         audit_files.dedup();
-        return audit_files;
+        return (audit_files, 0);
     }
 
     let baseline = match effective_baseline {
@@ -349,7 +349,11 @@ fn discover_audit_files(
             if f.is_empty() {
                 tracing::warn!(baseline = %baseline, "相对于 baseline 未发现变更文件");
             }
-            f.into_iter().filter(|cf| file_matches_project_type(cf, project_type)).map(|cf| cf.path).collect()
+            let total = f.len();
+            let filtered: Vec<PathBuf> =
+                f.into_iter().filter(|cf| file_matches_project_type(cf, project_type)).map(|cf| cf.path).collect();
+            let skipped = total - filtered.len();
+            (filtered, skipped)
         }
         Err(e) => {
             tracing::error!(error = %e, "获取变更文件失败");
@@ -398,7 +402,11 @@ fn run_single_project(
     let full_dirs: Vec<PathBuf> =
         if full && files.is_empty() && dirs.is_empty() { vec![repo_path.to_path_buf()] } else { Vec::new() };
     let effective_dirs: Vec<PathBuf> = if dirs.is_empty() { full_dirs } else { dirs.to_vec() };
-    let audit_files = discover_audit_files(files, &effective_dirs, effective_baseline, repo_path, project.project_type);
+    let (audit_files, type_filtered) = discover_audit_files(files, &effective_dirs, effective_baseline, repo_path, project.project_type);
+
+    if type_filtered > 0 {
+        tracing::info!(project = name, type_filtered, "文件因 project_type 过滤被跳过");
+    }
 
     tracing::info!(project = name, file_count = audit_files.len(), "开始审核");
 
@@ -555,7 +563,11 @@ fn run_all_projects(
         let db_config = project.database.as_ref().and_then(|n| config.databases.get(n));
 
         let audit_dirs: Vec<PathBuf> = if full { vec![repo_path.to_path_buf()] } else { Vec::new() };
-        let audit_files = discover_audit_files(&[], &audit_dirs, baseline, repo_path, project.project_type);
+        let (audit_files, type_filtered) = discover_audit_files(&[], &audit_dirs, baseline, repo_path, project.project_type);
+
+        if type_filtered > 0 {
+            tracing::info!(project = name, type_filtered, "文件因 project_type 过滤被跳过");
+        }
 
         tracing::info!(project = name, file_count = audit_files.len(), "开始审核");
 
@@ -833,7 +845,11 @@ fn is_explainable_dml(sql: &str) -> bool {
             .unwrap_or("")
             .trim_start_matches(|c: char| !c.is_alphabetic())
             .to_uppercase();
-        return matches!(first_word.as_str(), "SELECT" | "INSERT" | "UPDATE" | "DELETE" | "MERGE" | "WITH");
+        if matches!(first_word.as_str(), "SELECT" | "INSERT" | "UPDATE" | "DELETE" | "MERGE" | "WITH") {
+            return true;
+        }
+        // If the first statement is non-DML (SET, CREATE, ALTER, etc.), don't give up —
+        // check whether any later statement in the file is DML.
     }
     false
 }
