@@ -77,6 +77,7 @@ pub fn run_manifest(
             db_name,
             db_user,
             db_password_env,
+            None, // manifest 模式暂不使用进度条
         ));
         let severity_counts = cr_core::scoring::count_by_severity(&findings);
         let hs = cr_core::scoring::health_score(&findings);

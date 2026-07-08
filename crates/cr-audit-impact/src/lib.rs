@@ -57,6 +57,14 @@ pub enum CodewebError {
     #[error("codeweb 输出解析失败: {0}")]
     Parse(#[from] serde_json::Error),
 
+    /// 子进程成功退出但 stdout 为空（项目未建图）。
+    #[error(
+        "codeweb 输出了空的 impact 结果——项目可能未建图。\n\
+         建议: 在 coderc 命令中添加 --codeweb-analyze 参数，\
+         或先手动执行 `codeweb analyze --project <project_path>`"
+    )]
+    EmptyOutput,
+
     /// IO 错误（子进程创建、通信等）。
     #[error("codeweb IO 错误: {0}")]
     Io(#[from] std::io::Error),
@@ -170,6 +178,12 @@ impl CodewebRunner {
             .to_str()
             .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::InvalidInput, "project path is not valid UTF-8"))?;
         let (stdout, _stderr) = self.run_codeweb(&["impact", "--file", file, "--project", proj, "--format", "json"])?;
+        // codeweb 在项目未建图时 exit 0 但 stdout 为空（输出仅写入 stderr），
+        // 此时 serde_json::from_str("") 会产生晦涩的 "EOF while parsing" 错误。
+        // 提前识别这个场景，返回更明确的错误信息。
+        if stdout.trim().is_empty() {
+            return Err(CodewebError::EmptyOutput);
+        }
         let result: ImpactResult = serde_json::from_str(&stdout)?;
         Ok(result)
     }

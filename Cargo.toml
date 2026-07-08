@@ -21,7 +21,7 @@ members = [
 edition = "2021"
 rust-version = "1.75"
 license = "MIT OR Apache-2.0"
-version = "0.2.4"
+version = "0.2.5"
 
 [workspace.dependencies]
 # 内部 crate 间依赖
@@ -52,7 +52,7 @@ dirs = "5"
 include_dir = "0.7"
 
 # 生态依赖（子模块 path 引用）
-ogsql-parser = { git = "https://github.com/c2j/ogsql-parser" }
+ogsql-parser = { git = "https://github.com/c2j/ogsql-parser", tag = "v0.8.29" }
 ogexplain-core = { path = "lib/ogexplain-analyzer/crates/ogexplain-core" }
 ogsql-complexity = { path = "lib/ogexplain-analyzer/crates/ogsql-complexity" }
 tokio-opengauss = { path = "lib/rust-opengauss/crates/tokio-opengauss" }
