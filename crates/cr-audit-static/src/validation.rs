@@ -39,7 +39,7 @@ fn parser_error_to_finding(err: &ParserError, file_path: &str) -> Finding {
             None,
             Some("补全 SQL 语句，确保结构完整".into()),
         ),
-        ParserError::Warning { message, location } => Finding::new(
+        ParserError::Warning { message, location, .. } => Finding::new(
             "PARSE-WARN",
             Severity::Warning,
             DiagnosticCategory::ParseError,
@@ -218,7 +218,11 @@ mod tests {
 
     #[test]
     fn test_parser_error_to_finding_warning() {
-        let err = ParserError::Warning { message: "suspicious construct".into(), location: SourceLocation::default() };
+        let err = ParserError::Warning {
+            message: "suspicious construct".into(),
+            location: SourceLocation::default(),
+            level: WarningLevel::Caution,
+        };
         let f = parser_error_to_finding(&err, "test.sql");
         assert_eq!(f.rule_id, "PARSE-WARN");
         assert_eq!(f.severity, Severity::Warning);
