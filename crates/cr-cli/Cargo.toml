@@ -27,6 +27,7 @@ tracing = { workspace = true }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 serde_json = { workspace = true }
 encoding_rs = { workspace = true }
+globset = "0.4"
 indicatif = "0.17"
 
 [dev-dependencies]

@@ -53,6 +53,11 @@ pub struct ProjectConfig {
     pub database: Option<String>,
     /// codeweb 影响分析配置（三期）。`None` 表示该项目不启用。
     pub codeweb: Option<CodewebProjectConfig>,
+    /// 排除路径 glob 模式（相对于 `git_repo`）。
+    /// 匹配的文件不会进入审核管道。
+    /// 示例: `["**/test/**", "**/*_test.sql", "**/mock/**"]`
+    #[serde(default)]
+    pub exclude: Vec<String>,
 }
 
 /// 项目类型，驱动审核策略。
