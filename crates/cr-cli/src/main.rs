@@ -1,8 +1,8 @@
 use std::path::{Path, PathBuf};
 
 use clap::{Parser, Subcommand};
-
 use encoding_rs::Encoding;
+use indicatif::{ProgressBar, ProgressStyle};
 
 mod doctor;
 mod manifest;
@@ -414,6 +414,19 @@ fn run_single_project(
     maybe_codeweb_analyze(config, project, codeweb_analyze);
 
     let rt = tokio::runtime::Runtime::new().expect("创建 tokio 运行时失败");
+
+    let pb = if full && !audit_files.is_empty() {
+        let pb = ProgressBar::new(audit_files.len() as u64);
+        pb.set_style(
+            ProgressStyle::with_template("{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} {msg}")
+                .expect("valid progress bar template")
+                .progress_chars("=>-"),
+        );
+        Some(pb)
+    } else {
+        None
+    };
+
     let (all_findings, degraded, skipped) = rt.block_on(audit_files_async(
         &audit_files,
         db_config,
@@ -423,6 +436,7 @@ fn run_single_project(
         db_name,
         db_user,
         db_password_env,
+        pb.as_ref(),
     ));
 
     let all_findings = augment_with_impact(all_findings, &audit_files, &config.codeweb, project.codeweb.as_ref());
@@ -496,17 +510,33 @@ fn augment_with_impact(
         .count();
     tracing::info!(files = scope_count, "codeweb impact 分析启动（逐文件子进程调用，文件多时较慢）");
     let mut combined = findings;
+    let mut total = 0usize;
+    let mut failed = 0usize;
     for f in audit_files {
         let is_codeweb_scope =
             matches!(f.extension().and_then(|e| e.to_str()), Some("java") | Some("xml") | Some("sql"));
         if !is_codeweb_scope {
             continue;
         }
+        total += 1;
         let key = f.to_string_lossy();
         match runner.query_impact(&key, proj_path) {
             Ok(impact) => combined.extend(cr_audit_impact::impact_to_findings(&impact, &key)),
-            Err(e) => tracing::warn!(error = %e, file = %key, "codeweb impact 查询失败，跳过该文件"),
+            Err(e) => {
+                failed += 1;
+                // 全部文件都失败时，只在最后输出汇总建议（避免逐文件刷屏）。
+                // 部分成功部分失败时仍然输出单个文件的警告，方便定位异常文件。
+                if failed < total {
+                    tracing::warn!(error = %e, file = %key, "codeweb impact 查询失败，跳过该文件");
+                }
+            }
         }
+    }
+    if failed > 0 && failed == total {
+        tracing::warn!(
+            "codeweb impact 全部 {total} 个文件查询失败（项目可能未建图），\
+             建议在下一次审核时添加 --codeweb-analyze 参数让 coderc 自动建图"
+        );
     }
     combined
 }
@@ -575,8 +605,31 @@ fn run_all_projects(
 
         maybe_codeweb_analyze(config, project, codeweb_analyze);
 
-        let (findings, degraded, skipped) =
-            rt.block_on(audit_files_async(&audit_files, db_config, &config.rules, no_db, None, None, None, None));
+        let pb = if full && !audit_files.is_empty() {
+            let pb = ProgressBar::new(audit_files.len() as u64);
+            pb.set_style(
+                ProgressStyle::with_template(
+                    "{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} {msg}",
+                )
+                .expect("valid progress bar template")
+                .progress_chars("=>-"),
+            );
+            Some(pb)
+        } else {
+            None
+        };
+
+        let (findings, degraded, skipped) = rt.block_on(audit_files_async(
+            &audit_files,
+            db_config,
+            &config.rules,
+            no_db,
+            None,
+            None,
+            None,
+            None,
+            pb.as_ref(),
+        ));
 
         let findings = augment_with_impact(findings, &audit_files, &config.codeweb, project.codeweb.as_ref());
 
@@ -653,6 +706,7 @@ fn apply_diff_aware_filter(
     filtered
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) async fn audit_files_async(
     files: &[PathBuf],
     db_config: Option<&cr_config::DatabaseConfig>,
@@ -662,6 +716,7 @@ pub(crate) async fn audit_files_async(
     db_name: Option<&str>,
     db_user: Option<&str>,
     db_password_env: Option<&str>,
+    progress: Option<&ProgressBar>,
 ) -> (Vec<cr_core::Finding>, bool, Vec<String>) {
     let mut all_findings = Vec::new();
     let mut degraded = false;
@@ -739,6 +794,9 @@ pub(crate) async fn audit_files_async(
             Ok(c) => c,
             Err(e) => {
                 tracing::warn!(path = %file_path.display(), error = %e, "读取文件失败，跳过");
+                if let Some(pb) = progress {
+                    pb.inc(1);
+                }
                 continue;
             }
         };
@@ -765,21 +823,38 @@ pub(crate) async fn audit_files_async(
             cr_audit_static::FileKind::Unsupported => {
                 tracing::warn!(path = %file_path.display(), "不支持审核此文件类型，已跳过");
                 skipped.push(file_path_str.clone());
+                if let Some(pb) = progress {
+                    pb.inc(1);
+                }
                 continue;
             }
             _ => {
                 tracing::warn!(path = %file_path.display(), "未知文件类型，已跳过");
                 skipped.push(file_path_str.clone());
+                if let Some(pb) = progress {
+                    pb.inc(1);
+                }
                 continue;
             }
         };
 
-        tracing::info!(
-            path = %file_path.display(),
-            findings = findings.len(),
-            "文件审核完成"
-        );
+        let file_finding_count = findings.len();
         all_findings.append(&mut findings);
+
+        if let Some(pb) = progress {
+            pb.inc(1);
+            pb.set_message(format!("{} findings", all_findings.len()));
+        } else {
+            tracing::info!(
+                path = %file_path.display(),
+                findings = file_finding_count,
+                "文件审核完成"
+            );
+        }
+    }
+
+    if let Some(pb) = progress {
+        pb.finish_with_message(format!("{} files audited, {} findings", files.len(), all_findings.len()));
     }
 
     (all_findings, degraded, skipped)
