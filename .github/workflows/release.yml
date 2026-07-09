@@ -20,8 +20,6 @@ jobs:
   build-linux-x86_64:
     name: Build linux-x86_64 (glibc >= 2.17)
     runs-on: ubuntu-22.04
-    env:
-      ZIG_GLOBAL_CACHE_DIR: ${{ runner.temp }}/zig-cache
     steps:
       - name: Sanitize ref name
         id: ref
@@ -42,6 +40,7 @@ jobs:
         env:
           ASTGREP_RELEASE_BIN: ${{ github.workspace }}/lib/astgrep/target/x86_64-unknown-linux-gnu/release/astgrep
           CARGO_BUILD_EMBED_REQUIRED: "1"
+          ZIG_GLOBAL_CACHE_DIR: ${{ runner.temp }}/zig-cache
         run: cargo zigbuild -p cr-cli --release --target x86_64-unknown-linux-gnu.2.17 --features cr-audit-static/embed-astgrep
       - run: strip target/x86_64-unknown-linux-gnu/release/${{ env.BINARY_NAME }}
       - run: |
@@ -55,8 +54,6 @@ jobs:
   build-linux-arm64:
     name: Build linux-arm64 (glibc >= 2.17)
     runs-on: ubuntu-22.04
-    env:
-      ZIG_GLOBAL_CACHE_DIR: ${{ runner.temp }}/zig-cache
     steps:
       - name: Sanitize ref name
         id: ref
@@ -79,6 +76,7 @@ jobs:
         env:
           ASTGREP_RELEASE_BIN: ${{ github.workspace }}/lib/astgrep/target/aarch64-unknown-linux-gnu/release/astgrep
           CARGO_BUILD_EMBED_REQUIRED: "1"
+          ZIG_GLOBAL_CACHE_DIR: ${{ runner.temp }}/zig-cache
         run: cargo zigbuild -p cr-cli --release --target aarch64-unknown-linux-gnu.2.17 --features cr-audit-static/embed-astgrep
       - run: |
           sudo apt-get install -y binutils-aarch64-linux-gnu
