@@ -5,6 +5,7 @@
 
 pub mod baseline;
 pub mod compliance;
+pub mod dedup;
 pub mod engine;
 pub mod error;
 pub mod scoring;

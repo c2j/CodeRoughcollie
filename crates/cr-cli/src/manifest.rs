@@ -79,6 +79,7 @@ pub fn run_manifest(
             db_password_env,
             None, // manifest 模式暂不使用进度条
         ));
+        let findings = cr_core::dedup::dedup_findings(findings, &cr_core::dedup::builtin_groups());
         let severity_counts = cr_core::scoring::count_by_severity(&findings);
         let hs = cr_core::scoring::health_score(&findings);
         let ctx = cr_report::RenderContext::new(

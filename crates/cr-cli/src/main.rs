@@ -2,6 +2,7 @@ use std::path::{Path, PathBuf};
 
 use clap::{Parser, Subcommand};
 use encoding_rs::Encoding;
+use globset::{Glob, GlobSet, GlobSetBuilder};
 use indicatif::{ProgressBar, ProgressStyle};
 
 mod doctor;
@@ -311,15 +312,25 @@ fn discover_audit_files(
     effective_baseline: Option<&str>,
     repo_path: &Path,
     project_type: Option<cr_config::ProjectType>,
+    exclude_patterns: &[String],
 ) -> (Vec<PathBuf>, usize) {
     let user_explicit_sources = !files.is_empty() || !dirs.is_empty();
 
     if user_explicit_sources {
         let mut audit_files: Vec<PathBuf> = Vec::new();
+
+        // 显式 --files：CLI 优先级高于 exclude 配置
         audit_files.extend(files.iter().cloned());
+
         if !dirs.is_empty() {
             match cr_git::walk_directory(dirs) {
-                Ok(walked) => audit_files.extend(walked),
+                Ok(walked) => {
+                    let (walked, excluded) = apply_exclude_filter(walked, exclude_patterns, repo_path);
+                    if excluded > 0 {
+                        tracing::info!(excluded, "文件因 exclude 配置被跳过");
+                    }
+                    audit_files.extend(walked);
+                }
                 Err(e) => {
                     tracing::error!(error = %e, "目录遍历失败");
                     std::process::exit(2);
@@ -352,14 +363,69 @@ fn discover_audit_files(
             let total = f.len();
             let filtered: Vec<PathBuf> =
                 f.into_iter().filter(|cf| file_matches_project_type(cf, project_type)).map(|cf| cf.path).collect();
-            let skipped = total - filtered.len();
-            (filtered, skipped)
+            let type_skipped = total - filtered.len();
+
+            let (filtered, exclude_skipped) = apply_exclude_filter(filtered, exclude_patterns, repo_path);
+            if exclude_skipped > 0 {
+                tracing::info!(excluded = exclude_skipped, "文件因 exclude 配置被跳过");
+            }
+
+            (filtered, type_skipped)
         }
         Err(e) => {
             tracing::error!(error = %e, "获取变更文件失败");
             std::process::exit(2);
         }
     }
+}
+
+/// 根据 `exclude` glob 模式过滤文件列表。
+///
+/// 将每个文件路径归一化为 `repo_path` 的相对路径后再匹配，确保 `git diff`
+/// 产生的 repo-relative 路径和 `walk_directory` 返回的绝对路径行为一致。
+///
+/// 返回 (保留的文件, 被排除的文件数)。空 patterns 时直接返回原列表。
+fn apply_exclude_filter(
+    files: Vec<PathBuf>,
+    patterns: &[String],
+    repo_path: &Path,
+) -> (Vec<PathBuf>, usize) {
+    if patterns.is_empty() {
+        return (files, 0);
+    }
+
+    let mut builder = GlobSetBuilder::new();
+    for pattern in patterns {
+        match Glob::new(pattern) {
+            Ok(glob) => {
+                builder.add(glob);
+            }
+            Err(e) => {
+                tracing::warn!(pattern = %pattern, error = %e, "exclude 模式无效，忽略");
+            }
+        }
+    }
+
+    let glob_set: GlobSet = match builder.build() {
+        Ok(g) => g,
+        Err(_) => return (files, 0),
+    };
+
+    let mut included = Vec::with_capacity(files.len());
+    let mut excluded = 0usize;
+
+    for file in files {
+        // 归一化为 repo-relative 路径后匹配，屏蔽绝对/相对路径差异
+        let match_path: &Path = file.strip_prefix(repo_path).unwrap_or(&file);
+        if glob_set.is_match(match_path) {
+            tracing::debug!(path = %file.display(), "文件被 exclude 配置匹配，跳过");
+            excluded += 1;
+        } else {
+            included.push(file);
+        }
+    }
+
+    (included, excluded)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -402,8 +468,14 @@ fn run_single_project(
     let full_dirs: Vec<PathBuf> =
         if full && files.is_empty() && dirs.is_empty() { vec![repo_path.to_path_buf()] } else { Vec::new() };
     let effective_dirs: Vec<PathBuf> = if dirs.is_empty() { full_dirs } else { dirs.to_vec() };
-    let (audit_files, type_filtered) =
-        discover_audit_files(files, &effective_dirs, effective_baseline, repo_path, project.project_type);
+    let (audit_files, type_filtered) = discover_audit_files(
+        files,
+        &effective_dirs,
+        effective_baseline,
+        repo_path,
+        project.project_type,
+        &project.exclude,
+    );
 
     if type_filtered > 0 {
         tracing::info!(project = name, type_filtered, "文件因 project_type 过滤被跳过");
@@ -443,6 +515,8 @@ fn run_single_project(
 
     let all_findings =
         if diff_aware { apply_diff_aware_filter(all_findings, effective_baseline, repo_path) } else { all_findings };
+
+    let all_findings = cr_core::dedup::dedup_findings(all_findings, &cr_core::dedup::builtin_groups());
 
     let severity_counts = cr_core::scoring::count_by_severity(&all_findings);
     let hs = cr_core::scoring::health_score(&all_findings);
@@ -595,7 +669,7 @@ fn run_all_projects(
 
         let audit_dirs: Vec<PathBuf> = if full { vec![repo_path.to_path_buf()] } else { Vec::new() };
         let (audit_files, type_filtered) =
-            discover_audit_files(&[], &audit_dirs, baseline, repo_path, project.project_type);
+            discover_audit_files(&[], &audit_dirs, baseline, repo_path, project.project_type, &project.exclude);
 
         if type_filtered > 0 {
             tracing::info!(project = name, type_filtered, "文件因 project_type 过滤被跳过");
@@ -997,5 +1071,83 @@ mod tests {
         let out = augment_with_impact(existing, &[std::path::PathBuf::from("a.java")], &cfg, Some(&cw));
         assert_eq!(out.len(), 1, "二进制不可用时应保留原始 findings");
         assert_eq!(out[0].rule_id, "TEST-001");
+    }
+
+    // ── apply_exclude_filter tests ────────────────────────────────
+
+    #[test]
+    fn test_apply_exclude_filter_empty_patterns() {
+        let files = vec![PathBuf::from("a.sql")];
+        let (kept, excluded) = apply_exclude_filter(files, &[], Path::new("."));
+        assert_eq!(kept.len(), 1);
+        assert_eq!(excluded, 0);
+    }
+
+    #[test]
+    fn test_apply_exclude_filter_matches_relative_path() {
+        // git diff 产生 repo-relative 路径
+        let files = vec![PathBuf::from("src/test/foo.sql"), PathBuf::from("src/main/bar.sql")];
+        let (kept, excluded) = apply_exclude_filter(files, &["**/test/**".to_string()], Path::new("."));
+        assert_eq!(kept.len(), 1, "main/bar.sql 应保留");
+        assert_eq!(kept[0], PathBuf::from("src/main/bar.sql"));
+        assert_eq!(excluded, 1);
+    }
+
+    #[test]
+    fn test_apply_exclude_filter_matches_absolute_path() {
+        // walk_directory 在 full/--dir 模式下可能产生绝对路径
+        let repo = Path::new("/srv/repos/myapp");
+        let files = vec![
+            repo.join("src/test/foo.sql"),
+            repo.join("src/main/bar.sql"),
+        ];
+        let patterns = vec!["**/test/**".to_string(), "**/*_test.sql".to_string()];
+        let (kept, excluded) = apply_exclude_filter(files, &patterns, repo);
+        assert_eq!(kept.len(), 1, "绝对路径下 bar.sql 应保留");
+        assert_eq!(kept[0], repo.join("src/main/bar.sql"));
+        assert_eq!(excluded, 1);
+    }
+
+    #[test]
+    fn test_apply_exclude_filter_no_match() {
+        let files = vec![PathBuf::from("src/main/query.sql")];
+        let (kept, excluded) = apply_exclude_filter(files, &["**/test/**".to_string()], Path::new("."));
+        assert_eq!(kept.len(), 1);
+        assert_eq!(excluded, 0);
+    }
+
+    #[test]
+    fn test_apply_exclude_filter_multiple_patterns() {
+        let files = vec![
+            PathBuf::from("src/test/unit/test.sql"),
+            PathBuf::from("src/mock/data.sql"),
+            PathBuf::from("src/main/app.sql"),
+        ];
+        let patterns = vec!["**/test/**".to_string(), "**/mock/**".to_string()];
+        let (kept, excluded) = apply_exclude_filter(files, &patterns, Path::new("."));
+        assert_eq!(kept.len(), 1);
+        assert_eq!(kept[0], PathBuf::from("src/main/app.sql"));
+        assert_eq!(excluded, 2);
+    }
+
+    #[test]
+    fn test_apply_exclude_filter_anchored_pattern_works_both_modes() {
+        // 用户写 "test/**"（不带前导 **/），相对路径和绝对路径都应生效
+        let repo = Path::new("/srv/repos/myapp");
+
+        // 模式：从 repo 根开始的 test 目录
+        let patterns = vec!["test/**".to_string()];
+
+        // git diff 模式：repo-relative
+        let rel_files = vec![PathBuf::from("test/foo.sql"), PathBuf::from("src/main/bar.sql")];
+        let (kept, excluded) = apply_exclude_filter(rel_files, &patterns, repo);
+        assert_eq!(kept.len(), 1);
+        assert_eq!(excluded, 1, "repo-relative 路径应匹配 test/**");
+
+        // full/--dir 模式：绝对路径
+        let abs_files = vec![repo.join("test/foo.sql"), repo.join("src/main/bar.sql")];
+        let (kept, excluded) = apply_exclude_filter(abs_files, &patterns, repo);
+        assert_eq!(kept.len(), 1);
+        assert_eq!(excluded, 1, "绝对路径 strip_prefix 后也应匹配 test/**");
     }
 }
