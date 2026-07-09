@@ -516,6 +516,8 @@ fn run_single_project(
     let all_findings =
         if diff_aware { apply_diff_aware_filter(all_findings, effective_baseline, repo_path) } else { all_findings };
 
+    let all_findings = cr_core::dedup::dedup_findings(all_findings, &cr_core::dedup::builtin_groups());
+
     let severity_counts = cr_core::scoring::count_by_severity(&all_findings);
     let hs = cr_core::scoring::health_score(&all_findings);
     let hg = cr_core::scoring::HealthGrade::from_score(hs);
