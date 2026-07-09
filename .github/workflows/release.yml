@@ -20,6 +20,8 @@ jobs:
   build-linux-x86_64:
     name: Build linux-x86_64 (glibc >= 2.17)
     runs-on: ubuntu-22.04
+    env:
+      ZIG_GLOBAL_CACHE_DIR: ${{ runner.temp }}/zig-cache
     steps:
       - name: Sanitize ref name
         id: ref
@@ -53,6 +55,8 @@ jobs:
   build-linux-arm64:
     name: Build linux-arm64 (glibc >= 2.17)
     runs-on: ubuntu-22.04
+    env:
+      ZIG_GLOBAL_CACHE_DIR: ${{ runner.temp }}/zig-cache
     steps:
       - name: Sanitize ref name
         id: ref
