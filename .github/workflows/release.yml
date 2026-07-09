@@ -33,7 +33,7 @@ jobs:
       - uses: mlugg/setup-zig@v1
         with:
           version: "0.14.0" # fixes zig cc cache race in 0.13.0
-      - run: cargo install cargo-zigbuild
+      - run: cargo install cargo-zigbuild --version 0.19.2
       - name: Build embedded astgrep (target)
         run: cargo zigbuild --manifest-path lib/astgrep/Cargo.toml --release --target x86_64-unknown-linux-gnu.2.17
       - name: Build coderc (embed-astgrep)
@@ -68,7 +68,7 @@ jobs:
       - uses: mlugg/setup-zig@v1
         with:
           version: "0.14.0" # fixes zig cc cache race in 0.13.0
-      - run: cargo install cargo-zigbuild
+      - run: cargo install cargo-zigbuild --version 0.19.2
       - name: Build embedded astgrep (target)
         run: cargo zigbuild --manifest-path lib/astgrep/Cargo.toml --release --target aarch64-unknown-linux-gnu.2.17
       - name: Build coderc (embed-astgrep)
