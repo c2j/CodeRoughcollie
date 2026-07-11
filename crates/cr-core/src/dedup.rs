@@ -39,31 +39,16 @@ pub struct DedupRule {
 pub fn builtin_groups() -> Vec<DedupRule> {
     vec![
         // G1: SELECT *
-        DedupRule {
-            canonical: "STATIC-SELECT-STAR",
-            also_fires: &["JAVA-SQL-001", "LINT-R001"],
-        },
+        DedupRule { canonical: "STATIC-SELECT-STAR", also_fires: &["JAVA-SQL-001", "LINT-R001"] },
         // G2: UPDATE 无 WHERE
         // JAVA-SQL-002 是 UPDATE 和 DELETE 的统一规则，在找不到 STATIC-* 时作为 fallback
-        DedupRule {
-            canonical: "STATIC-UPDATE-NO-WHERE",
-            also_fires: &["JAVA-SQL-002", "LINT-C007"],
-        },
+        DedupRule { canonical: "STATIC-UPDATE-NO-WHERE", also_fires: &["JAVA-SQL-002", "LINT-C007"] },
         // G3: DELETE 无 WHERE
-        DedupRule {
-            canonical: "STATIC-DELETE-NO-WHERE",
-            also_fires: &["JAVA-SQL-002", "LINT-C008"],
-        },
+        DedupRule { canonical: "STATIC-DELETE-NO-WHERE", also_fires: &["JAVA-SQL-002", "LINT-C008"] },
         // G4: 隐式类型转换（EXPLAIN 实际执行 > 静态 lint 推断）
-        DedupRule {
-            canonical: "TYPE-001",
-            also_fires: &["LINT-R005"],
-        },
+        DedupRule { canonical: "TYPE-001", also_fires: &["LINT-R005"] },
         // G5: 全表扫描 / 无索引查询（EXPLAIN 实际执行 > 静态 lint 推断）
-        DedupRule {
-            canonical: "SCAN-001",
-            also_fires: &["LINT-R009"],
-        },
+        DedupRule { canonical: "SCAN-001", also_fires: &["LINT-R009"] },
     ]
 }
 
@@ -107,7 +92,7 @@ pub fn dedup_findings(findings: Vec<Finding>, groups: &[DedupRule]) -> Vec<Findi
             for &(g_idx, priority) in entries {
                 let has_canonical = groups_map
                     .get(&(f.file_path.clone(), g_idx))
-                    .map_or(false, |candidates| candidates.iter().any(|c| c.priority == 0));
+                    .is_some_and(|candidates| candidates.iter().any(|c| c.priority == 0));
                 if has_canonical {
                     // canonical 已存在，加入此组会被抑制，跳过
                     continue;
@@ -120,10 +105,7 @@ pub fn dedup_findings(findings: Vec<Finding>, groups: &[DedupRule]) -> Vec<Findi
                 };
             }
             if let Some((g_idx, priority)) = best {
-                groups_map
-                    .entry((f.file_path.clone(), g_idx))
-                    .or_default()
-                    .push(Candidate { finding: f, priority });
+                groups_map.entry((f.file_path.clone(), g_idx)).or_default().push(Candidate { finding: f, priority });
             } else {
                 // 所有组都有 canonical，这条 finding 被完全抑制
             }
@@ -168,10 +150,7 @@ mod tests {
     /// 验证基本去重：canonical 存在时抑制 also_fires
     #[test]
     fn test_dedup_removes_also_fires() {
-        let groups = vec![DedupRule {
-            canonical: "STATIC-SELECT-STAR",
-            also_fires: &["JAVA-SQL-001", "LINT-R001"],
-        }];
+        let groups = vec![DedupRule { canonical: "STATIC-SELECT-STAR", also_fires: &["JAVA-SQL-001", "LINT-R001"] }];
 
         let findings = vec![
             make_finding("LINT-R001", "test.sql"),
@@ -191,15 +170,9 @@ mod tests {
     /// canonical 不存在时，保留 also_fires 中的第一条
     #[test]
     fn test_dedup_fallback_to_also_fires() {
-        let groups = vec![DedupRule {
-            canonical: "STATIC-SELECT-STAR",
-            also_fires: &["JAVA-SQL-001", "LINT-R001"],
-        }];
+        let groups = vec![DedupRule { canonical: "STATIC-SELECT-STAR", also_fires: &["JAVA-SQL-001", "LINT-R001"] }];
 
-        let findings = vec![
-            make_finding("LINT-R001", "test.sql"),
-            make_finding("JAVA-SQL-001", "test.sql"),
-        ];
+        let findings = vec![make_finding("LINT-R001", "test.sql"), make_finding("JAVA-SQL-001", "test.sql")];
 
         let result = dedup_findings(findings, &groups);
         assert_eq!(result.len(), 1);
@@ -209,10 +182,7 @@ mod tests {
     /// 不同 file_path 各自独立去重
     #[test]
     fn test_dedup_respects_file_path() {
-        let groups = vec![DedupRule {
-            canonical: "STATIC-SELECT-STAR",
-            also_fires: &["LINT-R001"],
-        }];
+        let groups = vec![DedupRule { canonical: "STATIC-SELECT-STAR", also_fires: &["LINT-R001"] }];
 
         let findings = vec![
             make_finding("LINT-R001", "a.sql"),
@@ -239,15 +209,9 @@ mod tests {
     /// 不在任意组中的 finding 原样保留
     #[test]
     fn test_dedup_preserves_ungrouped() {
-        let groups = vec![DedupRule {
-            canonical: "STATIC-SELECT-STAR",
-            also_fires: &["LINT-R001"],
-        }];
+        let groups = vec![DedupRule { canonical: "STATIC-SELECT-STAR", also_fires: &["LINT-R001"] }];
 
-        let findings = vec![
-            make_finding("TYPE-001", "test.sql"),
-            make_finding("COMPLEX-001", "test.sql"),
-        ];
+        let findings = vec![make_finding("TYPE-001", "test.sql"), make_finding("COMPLEX-001", "test.sql")];
 
         let result = dedup_findings(findings, &groups);
         assert_eq!(result.len(), 2);
@@ -316,8 +280,11 @@ mod tests {
             v
         };
 
-        assert_eq!(ids, vec!["STATIC-DELETE-NO-WHERE", "STATIC-UPDATE-NO-WHERE"],
-            "STATIC-* should suppress LINT-C007/C008");
+        assert_eq!(
+            ids,
+            vec!["STATIC-DELETE-NO-WHERE", "STATIC-UPDATE-NO-WHERE"],
+            "STATIC-* should suppress LINT-C007/C008"
+        );
     }
 
     /// 回归：STATIC-UPDATE-NO-WHERE 不存在时，JAVA-SQL-002 作为 fallback 抑制 LINT-C007
@@ -325,10 +292,7 @@ mod tests {
     fn test_dedup_update_fallback_to_java_sql() {
         let groups = builtin_groups();
 
-        let findings = vec![
-            make_finding("JAVA-SQL-002", "query.sql"),
-            make_finding("LINT-C007", "query.sql"),
-        ];
+        let findings = vec![make_finding("JAVA-SQL-002", "query.sql"), make_finding("LINT-C007", "query.sql")];
 
         let result = dedup_findings(findings, &groups);
         assert_eq!(result.len(), 1);
