@@ -319,7 +319,6 @@ fn discover_audit_files(
     if user_explicit_sources {
         let mut audit_files: Vec<PathBuf> = Vec::new();
 
-        // 显式 --files：CLI 优先级高于 exclude 配置
         audit_files.extend(files.iter().cloned());
 
         if !dirs.is_empty() {
@@ -385,11 +384,7 @@ fn discover_audit_files(
 /// 产生的 repo-relative 路径和 `walk_directory` 返回的绝对路径行为一致。
 ///
 /// 返回 (保留的文件, 被排除的文件数)。空 patterns 时直接返回原列表。
-fn apply_exclude_filter(
-    files: Vec<PathBuf>,
-    patterns: &[String],
-    repo_path: &Path,
-) -> (Vec<PathBuf>, usize) {
+fn apply_exclude_filter(files: Vec<PathBuf>, patterns: &[String], repo_path: &Path) -> (Vec<PathBuf>, usize) {
     if patterns.is_empty() {
         return (files, 0);
     }
@@ -426,6 +421,53 @@ fn apply_exclude_filter(
     }
 
     (included, excluded)
+}
+
+/// 将文件列表按 `exclude` glob 模式分为「可审核」和「被忽略」两组。
+///
+/// 与 [`apply_exclude_filter`] 不同，此函数不静默丢弃被排除的文件，
+/// 而是返回被排除的文件路径（字符串形式），用于在报告中展示。
+/// 适用于 `--files` 和 `--manifest` 模式。
+pub(crate) fn partition_by_exclude(
+    files: Vec<PathBuf>,
+    patterns: &[String],
+    repo_path: &Path,
+) -> (Vec<PathBuf>, Vec<String>) {
+    if patterns.is_empty() {
+        return (files, vec![]);
+    }
+
+    let mut builder = GlobSetBuilder::new();
+    for pattern in patterns {
+        match Glob::new(pattern) {
+            Ok(glob) => {
+                builder.add(glob);
+            }
+            Err(e) => {
+                tracing::warn!(pattern = %pattern, error = %e, "exclude 模式无效，忽略");
+            }
+        }
+    }
+
+    let glob_set: GlobSet = match builder.build() {
+        Ok(g) => g,
+        Err(_) => return (files, vec![]),
+    };
+
+    let mut auditable = Vec::with_capacity(files.len());
+    let mut ignored = Vec::new();
+
+    for file in files {
+        let match_path: &Path = file.strip_prefix(repo_path).unwrap_or(&file);
+        if glob_set.is_match(match_path) {
+            tracing::debug!(path = %file.display(), "文件被 exclude 配置匹配，标记为 Ignored");
+            ignored.push(file.to_string_lossy().to_string());
+        } else {
+            auditable.push(file);
+        }
+    }
+
+    (auditable, ignored)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -481,6 +523,12 @@ fn run_single_project(
         tracing::info!(project = name, type_filtered, "文件因 project_type 过滤被跳过");
     }
 
+    // 将 --files 中匹配 exclude 配置的文件分离为"忽略"组（不审核，但在报告中展示）
+    let (audit_files, ignored_files) = partition_by_exclude(audit_files, &project.exclude, repo_path);
+    if !ignored_files.is_empty() {
+        tracing::info!(project = name, ignored = ignored_files.len(), "文件因 exclude 配置被标记为 Ignored");
+    }
+
     tracing::info!(project = name, file_count = audit_files.len(), "开始审核");
 
     maybe_codeweb_analyze(config, project, codeweb_analyze);
@@ -530,7 +578,8 @@ fn run_single_project(
         effective_baseline.unwrap_or("unknown").to_string(),
         degraded,
     )
-    .with_skipped_files(skipped);
+    .with_skipped_files(skipped)
+    .with_ignored_files(ignored_files);
 
     let report = cr_report::render(&ctx, format);
 
@@ -1097,10 +1146,7 @@ mod tests {
     fn test_apply_exclude_filter_matches_absolute_path() {
         // walk_directory 在 full/--dir 模式下可能产生绝对路径
         let repo = Path::new("/srv/repos/myapp");
-        let files = vec![
-            repo.join("src/test/foo.sql"),
-            repo.join("src/main/bar.sql"),
-        ];
+        let files = vec![repo.join("src/test/foo.sql"), repo.join("src/main/bar.sql")];
         let patterns = vec!["**/test/**".to_string(), "**/*_test.sql".to_string()];
         let (kept, excluded) = apply_exclude_filter(files, &patterns, repo);
         assert_eq!(kept.len(), 1, "绝对路径下 bar.sql 应保留");
@@ -1149,5 +1195,66 @@ mod tests {
         let (kept, excluded) = apply_exclude_filter(abs_files, &patterns, repo);
         assert_eq!(kept.len(), 1);
         assert_eq!(excluded, 1, "绝对路径 strip_prefix 后也应匹配 test/**");
+    }
+
+    // ── partition_by_exclude tests ─────────────────────────────────
+
+    #[test]
+    fn test_partition_by_exclude_empty_patterns() {
+        let files = vec![PathBuf::from("a.sql")];
+        let (auditable, ignored) = partition_by_exclude(files, &[], Path::new("."));
+        assert_eq!(auditable.len(), 1);
+        assert!(ignored.is_empty());
+    }
+
+    #[test]
+    fn test_partition_by_exclude_returns_ignored_as_strings() {
+        let files = vec![PathBuf::from("src/test/foo.sql"), PathBuf::from("src/main/bar.sql")];
+        let (auditable, ignored) = partition_by_exclude(files, &["**/test/**".to_string()], Path::new("."));
+        assert_eq!(auditable.len(), 1);
+        assert_eq!(auditable[0], PathBuf::from("src/main/bar.sql"));
+        assert_eq!(ignored, vec!["src/test/foo.sql"]);
+    }
+
+    #[test]
+    fn test_partition_by_exclude_absolute_path() {
+        let repo = Path::new("/srv/repos/myapp");
+        let files = vec![repo.join("src/test/foo.sql"), repo.join("src/main/bar.sql")];
+        let (auditable, ignored) = partition_by_exclude(files, &["**/test/**".to_string()], repo);
+        assert_eq!(auditable.len(), 1);
+        assert_eq!(auditable[0], repo.join("src/main/bar.sql"));
+        assert_eq!(ignored, vec![repo.join("src/test/foo.sql").to_string_lossy().to_string()]);
+    }
+
+    #[test]
+    fn test_partition_by_exclude_no_match() {
+        let files = vec![PathBuf::from("src/main/query.sql")];
+        let (auditable, ignored) = partition_by_exclude(files, &["**/test/**".to_string()], Path::new("."));
+        assert_eq!(auditable.len(), 1);
+        assert!(ignored.is_empty());
+    }
+
+    #[test]
+    fn test_partition_by_exclude_multiple_patterns() {
+        let files = vec![
+            PathBuf::from("src/test/unit/test.sql"),
+            PathBuf::from("src/mock/data.sql"),
+            PathBuf::from("src/main/app.sql"),
+        ];
+        let patterns = vec!["**/test/**".to_string(), "**/mock/**".to_string()];
+        let (auditable, ignored) = partition_by_exclude(files, &patterns, Path::new("."));
+        assert_eq!(auditable.len(), 1);
+        assert_eq!(auditable[0], PathBuf::from("src/main/app.sql"));
+        assert_eq!(ignored.len(), 2);
+        assert!(ignored.contains(&"src/test/unit/test.sql".to_string()));
+        assert!(ignored.contains(&"src/mock/data.sql".to_string()));
+    }
+
+    #[test]
+    fn test_partition_by_exclude_all_ignored() {
+        let files = vec![PathBuf::from("src/test/a.sql"), PathBuf::from("src/test/b.sql")];
+        let (auditable, ignored) = partition_by_exclude(files, &["**/test/**".to_string()], Path::new("."));
+        assert!(auditable.is_empty());
+        assert_eq!(ignored.len(), 2);
     }
 }

@@ -50,6 +50,13 @@ pub fn run_manifest(
         }
         let audit_files: Vec<PathBuf> =
             entry.files.iter().map(|f| if f.is_absolute() { f.clone() } else { repo_path.join(f) }).collect();
+
+        // 将 manifest 中匹配 exclude 配置的文件分离为"忽略"组
+        let (audit_files, ignored_files) = crate::partition_by_exclude(audit_files, &project.exclude, repo_path);
+        if !ignored_files.is_empty() {
+            tracing::info!(project = %entry.project, ignored = ignored_files.len(), "文件因 exclude 配置被标记为 Ignored");
+        }
+
         // If none of the resolved files exist, check for common misconfiguration:
         // manifest paths that already include the git_repo prefix, causing double-joining.
         let all_missing = audit_files.iter().all(|f| !f.exists());
@@ -90,7 +97,8 @@ pub fn run_manifest(
             entry.branch.clone(),
             degraded,
         )
-        .with_skipped_files(skipped);
+        .with_skipped_files(skipped)
+        .with_ignored_files(ignored_files);
         sections.push(cr_report::ProjectSection { name: format!("{}@{}", entry.project, entry.branch), ctx });
     }
     if deduped_count > 0 {
