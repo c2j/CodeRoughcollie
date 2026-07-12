@@ -64,6 +64,12 @@ pub struct RenderContext {
     /// 这些文件因类型不受支持而未经过审核（例如 `pom.xml`）。
     /// 此字段不影响 `health_score`，仅用于审计追溯。
     pub skipped_files: Vec<String>,
+    /// 被配置排除而忽略的文件（exclude 模式匹配）。
+    ///
+    /// 这些文件出现在 `--files` 或 `--manifest` 中，但匹配了 `project.exclude`
+    /// 配置中的 glob 模式，因此未经过审核。
+    /// 此字段不影响 `health_score`，仅用于告知用户哪些文件被配置排除。
+    pub ignored_files: Vec<String>,
 }
 
 impl RenderContext {
@@ -77,7 +83,16 @@ impl RenderContext {
         branch: String,
         degraded: bool,
     ) -> Self {
-        Self { findings, severity_counts, health_score, health_grade, branch, degraded, skipped_files: Vec::new() }
+        Self {
+            findings,
+            severity_counts,
+            health_score,
+            health_grade,
+            branch,
+            degraded,
+            skipped_files: Vec::new(),
+            ignored_files: Vec::new(),
+        }
     }
 
     /// 设置跳过的文件列表（构建器模式）。
@@ -87,6 +102,17 @@ impl RenderContext {
     #[must_use]
     pub fn with_skipped_files(mut self, files: Vec<String>) -> Self {
         self.skipped_files = files;
+        self
+    }
+
+    /// 设置被配置排除而忽略的文件列表（构建器模式）。
+    ///
+    /// 这些文件出现在 `--files` 或 `--manifest` 中，但匹配了 `project.exclude`
+    /// 配置中的 glob 模式，因此未经过审核。
+    /// 不影响 `health_score`。
+    #[must_use]
+    pub fn with_ignored_files(mut self, files: Vec<String>) -> Self {
+        self.ignored_files = files;
         self
     }
 }
@@ -115,6 +141,9 @@ pub fn render_markdown(ctx: &RenderContext) -> String {
 
     // ── 跳过文件报告 ──
     render_skipped_files(&mut out, ctx);
+
+    // ── 忽略文件报告（被配置排除） ──
+    render_ignored_files(&mut out, ctx);
 
     // ── 降级警告 ──
     if ctx.degraded {
@@ -163,6 +192,9 @@ fn render_summary(out: &mut String, ctx: &RenderContext) {
     if !ctx.skipped_files.is_empty() {
         out.push_str(&format!("| 跳过（不支持类型） | **{}** |\n", ctx.skipped_files.len()));
     }
+    if !ctx.ignored_files.is_empty() {
+        out.push_str(&format!("| Ignored（被配置排除） | **{}** |\n", ctx.ignored_files.len()));
+    }
     out.push('\n');
 }
 
@@ -182,6 +214,20 @@ fn render_skipped_files(out: &mut String, ctx: &RenderContext) {
         for f in &ctx.skipped_files {
             out.push_str(&format!("- {f}\n"));
         }
+    }
+
+    out.push('\n');
+}
+
+fn render_ignored_files(out: &mut String, ctx: &RenderContext) {
+    if ctx.ignored_files.is_empty() {
+        return;
+    }
+
+    out.push_str("### ⏭️ Ignored（被配置排除）\n\n");
+
+    for f in &ctx.ignored_files {
+        out.push_str(&format!("- {f}\n"));
     }
 
     out.push('\n');
@@ -287,6 +333,7 @@ pub fn render_json(ctx: &RenderContext) -> String {
     let output = serde_json::json!({
         "findings": ctx.findings,
         "skipped_files": ctx.skipped_files,
+        "ignored_files": ctx.ignored_files,
     });
     serde_json::to_string_pretty(&output).unwrap_or_else(|e| format!("{{\"error\": \"{e}\"}}"))
 }
@@ -429,6 +476,7 @@ fn render_multi_markdown(ctx: &MultiProjectContext) -> String {
         out.push_str(&format!("---\n\n# 项目: {}\n\n", section.name));
         render_summary(&mut out, &section.ctx);
         render_skipped_files(&mut out, &section.ctx);
+        render_ignored_files(&mut out, &section.ctx);
         if section.ctx.degraded {
             out.push_str("> ⚠️ **EXPLAIN 降级**：数据库连接不可用，已自动回退为静态分析。\n\n");
         }
@@ -452,6 +500,7 @@ fn render_multi_json(ctx: &MultiProjectContext) -> String {
                 "name": s.name,
                 "findings": s.ctx.findings,
                 "skipped_files": s.ctx.skipped_files,
+                "ignored_files": s.ctx.ignored_files,
             })
         })
         .collect();
@@ -724,6 +773,47 @@ mod tests {
         assert!(output.contains("file1.xml"));
         assert!(output.contains("file10.xml"));
         assert!(!output.contains("file11.xml"));
+    }
+
+    #[test]
+    fn test_render_markdown_ignored_files_empty() {
+        let ctx =
+            RenderContext::new(vec![], SeverityCounts::default(), 100.0, HealthGrade::Excellent, "main".into(), false);
+        let output = render_markdown(&ctx);
+        assert!(!output.contains("Ignored"));
+        assert!(!output.contains("被配置排除"));
+    }
+
+    #[test]
+    fn test_render_markdown_with_ignored_files() {
+        let ctx =
+            RenderContext::new(vec![], SeverityCounts::default(), 100.0, HealthGrade::Excellent, "main".into(), false)
+                .with_ignored_files(vec!["src/test/foo.sql".into(), "mock/data.sql".into()]);
+        let output = render_markdown(&ctx);
+        assert!(output.contains("Ignored（被配置排除）"));
+        assert!(output.contains("**2**"));
+        assert!(output.contains("src/test/foo.sql"));
+        assert!(output.contains("mock/data.sql"));
+        assert!(output.contains("⏭️"));
+    }
+
+    #[test]
+    fn test_render_json_ignored_files() {
+        let mut ctx = sample_ctx();
+        ctx.ignored_files = vec!["src/test/excluded.sql".into()];
+        let output = render_json(&ctx);
+        let parsed: serde_json::Value = serde_json::from_str(&output).unwrap();
+        assert!(parsed.is_object());
+        assert_eq!(parsed["ignored_files"].as_array().unwrap().len(), 1);
+        assert_eq!(parsed["ignored_files"][0], "src/test/excluded.sql");
+    }
+
+    #[test]
+    fn test_render_json_ignored_files_empty() {
+        let ctx = sample_ctx();
+        let output = render_json(&ctx);
+        let parsed: serde_json::Value = serde_json::from_str(&output).unwrap();
+        assert!(parsed["ignored_files"].as_array().unwrap().is_empty());
     }
 
     #[test]
