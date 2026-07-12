@@ -257,6 +257,39 @@ pub struct OutputConfig {
     /// Warning 时退出码。
     #[serde(default)]
     pub exit_code_on_warning: i32,
+    /// `[output.filter]` 段：按 rule_id / severity / category 过滤结果。
+    #[serde(default)]
+    pub filter: Option<FilterConfig>,
+}
+
+/// `[output.filter]` 段：按 rule_id / severity / category 保留或筛除审核结果。
+///
+/// 每个字段的格式：`{mode}:{value1},{value2},...`
+/// - `mode` 为 `includes`（仅保留匹配项）或 `excludes`（排除匹配项）
+/// - 值列表用逗号 `,` 分隔
+/// - `rule_id` 支持通配符 `*`（如 `TYPE-*` 匹配所有 TYPE 开头的规则）
+/// - `severity` 值：`critical` / `warning` / `info`
+/// - `category` 值：kebab-case 格式（如 `scan-efficiency`、`join-strategy`）
+///
+/// 示例：
+/// ```toml
+/// [output.filter]
+/// rule_id = "excludes:SCAN-001,TYPE-*"
+/// severity = "includes:critical,warning"
+/// category = "excludes:parse-error"
+/// ```
+#[derive(Debug, Clone, Deserialize, Default)]
+#[non_exhaustive]
+pub struct FilterConfig {
+    /// rule_id 过滤表达式，如 `"excludes:SCAN-001,TYPE-*"` 或 `"includes:SCAN-*"`。
+    #[serde(default)]
+    pub rule_id: Option<String>,
+    /// severity 过滤表达式，如 `"includes:critical,warning"`。
+    #[serde(default)]
+    pub severity: Option<String>,
+    /// category 过滤表达式，如 `"excludes:parse-error"`。
+    #[serde(default)]
+    pub category: Option<String>,
 }
 
 /// `[notifications]` 段（四期）。
@@ -518,6 +551,7 @@ impl Default for OutputConfig {
             path: None,
             exit_code_on_critical: default_exit_code(),
             exit_code_on_warning: 0,
+            filter: None,
         }
     }
 }

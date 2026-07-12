@@ -65,6 +65,18 @@ path = "./audit-report.md"
 exit_code_on_critical = 1
 exit_code_on_warning = 0
 
+# [output.filter] 段（可选）：按 rule_id / severity / category 保留或筛除审核结果。
+# 每个字段格式：{mode}:{value1},{value2},...
+#   mode = includes（仅保留匹配项）或 excludes（排除匹配项）
+#   rule_id 支持通配符 *（如 TYPE-* 匹配所有 TYPE 开头的规则）
+#   severity 值：critical / warning / info
+#   category 值：scan-efficiency / join-strategy / memory-usage / sort-efficiency / ...
+# 示例：排除 SCAN-001 和所有 TYPE-* 规则，仅保留 critical/warning，排除 parse-error 分类
+# [output.filter]
+# rule_id = "excludes:SCAN-001,TYPE-*"
+# severity = "includes:critical,warning"
+# category = "excludes:parse-error"
+
 # [codeweb] 段（三期，可选）：语义影响分析，子进程调用 codeweb
 [codeweb]
 # binary = "/usr/local/bin/codeweb"   # 缺省从 PATH 查找
