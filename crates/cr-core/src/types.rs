@@ -85,6 +85,29 @@ pub enum DiagnosticCategory {
     General,
 }
 
+impl DiagnosticCategory {
+    /// 返回 kebab-case 字符串表示（用于过滤表达式匹配）。
+    #[must_use]
+    pub fn as_kebab_str(&self) -> &'static str {
+        match self {
+            Self::ScanEfficiency => "scan-efficiency",
+            Self::JoinStrategy => "join-strategy",
+            Self::MemoryUsage => "memory-usage",
+            Self::SortEfficiency => "sort-efficiency",
+            Self::NetworkOverhead => "network-overhead",
+            Self::CostMisestimation => "cost-misestimation",
+            Self::PushdownFailure => "pushdown-failure",
+            Self::TypeMismatch => "type-mismatch",
+            Self::Vectorization => "vectorization",
+            Self::SubqueryStructure => "subquery-structure",
+            Self::DistributionIssue => "distribution-issue",
+            Self::ParseError => "parse-error",
+            Self::ValidationSemantic => "validation-semantic",
+            Self::General => "general",
+        }
+    }
+}
+
 /// 单条审核发现。
 ///
 /// 所有审核维度（静态、EXPLAIN、复杂度）统一产出此类型。
