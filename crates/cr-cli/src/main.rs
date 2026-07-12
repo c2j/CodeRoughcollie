@@ -566,6 +566,13 @@ fn run_single_project(
 
     let all_findings = cr_core::dedup::dedup_findings(all_findings, &cr_core::dedup::builtin_groups());
 
+    let all_findings = cr_core::filter::filter_findings(
+        all_findings,
+        config.output.filter.as_ref().and_then(|f| f.rule_id.as_deref()),
+        config.output.filter.as_ref().and_then(|f| f.severity.as_deref()),
+        config.output.filter.as_ref().and_then(|f| f.category.as_deref()),
+    );
+
     let severity_counts = cr_core::scoring::count_by_severity(&all_findings);
     let hs = cr_core::scoring::health_score(&all_findings);
     let hg = cr_core::scoring::HealthGrade::from_score(hs);
@@ -757,6 +764,13 @@ fn run_all_projects(
         let findings = augment_with_impact(findings, &audit_files, &config.codeweb, project.codeweb.as_ref());
 
         let findings = if diff_aware { apply_diff_aware_filter(findings, baseline, repo_path) } else { findings };
+
+        let findings = cr_core::filter::filter_findings(
+            findings,
+            config.output.filter.as_ref().and_then(|f| f.rule_id.as_deref()),
+            config.output.filter.as_ref().and_then(|f| f.severity.as_deref()),
+            config.output.filter.as_ref().and_then(|f| f.category.as_deref()),
+        );
 
         let severity_counts = cr_core::scoring::count_by_severity(&findings);
         let hs = cr_core::scoring::health_score(&findings);
