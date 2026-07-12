@@ -8,6 +8,7 @@ pub mod compliance;
 pub mod dedup;
 pub mod engine;
 pub mod error;
+pub mod filter;
 pub mod scoring;
 pub mod traits;
 pub mod types;
