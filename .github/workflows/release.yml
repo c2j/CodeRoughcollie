@@ -72,6 +72,8 @@ jobs:
         with:
           version: "0.14.0" # fixes zig cc cache race in 0.13.0
       - run: cargo install cargo-zigbuild --version 0.19.2
+      - name: Install cross-compilation toolchain
+        run: sudo apt-get install -y binutils-aarch64-linux-gnu
       - name: Build embedded astgrep (target)
         env:
           ZIG_GLOBAL_CACHE_DIR: ${{ runner.temp }}/zig-cache
