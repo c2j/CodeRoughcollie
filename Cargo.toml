@@ -52,7 +52,7 @@ dirs = "5"
 include_dir = "0.7"
 
 # 生态依赖（子模块 path 引用）
-ogsql-parser = { git = "https://github.com/c2j/ogsql-parser", tag = "v0.8.29" }
+ogsql-parser = { git = "https://github.com/c2j/ogsql-parser", tag = "v0.8.31" }
 ogexplain-core = { path = "lib/ogexplain-analyzer/crates/ogexplain-core" }
 ogsql-complexity = { path = "lib/ogexplain-analyzer/crates/ogsql-complexity" }
 tokio-opengauss = { path = "lib/rust-opengauss/crates/tokio-opengauss" }
