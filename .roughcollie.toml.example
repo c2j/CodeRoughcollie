@@ -32,12 +32,20 @@ project_type = "gaussdb-sql"
 baseline = "main"
 git_repo = "."
 database = "gaussdb-prod"
+# exclude: glob 模式相对于 git_repo，匹配的文件不进入审核管道
+exclude = [
+    "**/test/**",            # 测试目录
+    "**/migrations/**",      # 数据库迁移脚本
+]
 
 [projects.payment-service]
 project_type = "java"
 baseline = "dev"
 git_repo = "."
 database = "gaussdb-prod"
+exclude = [
+    "**/entity/**",          # JPA 实体类（纯 POJO，无 SQL 注入面）
+]
 
 # === 全局配置 ===
 
