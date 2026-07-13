@@ -126,6 +126,85 @@ format = "markdown"                 # markdown / json / sarif
 path = "./audit-report.md"
 exit_code_on_critical = 1           # Critical 时退出码非 0
 exit_code_on_warning = 0            # Warning 时退出码 0（仅报告）
+
+[output.filter]
+# 可选：按 rule_id / severity / category 保留或筛除审核结果（详见下方说明）
+severity = "includes:critical,warning"
+rule_id = "excludes:COMPLEX-*"
+category = "excludes:parse-error"
+```
+
+### 文件排除与结果过滤
+
+CodeRoughcollie 提供两个独立层次的过滤机制，作用阶段和效果不同：
+
+#### 项目级文件排除 `[projects.*].exclude`
+
+在文件进入审核管道**之前**按 glob 模式排除。模式相对于项目的 `git_repo` 目录。
+
+```toml
+[projects.my-sql-project]
+git_repo = "."
+project_type = "gaussdb-sql"
+exclude = [
+    "**/test/**",           # 排除测试目录
+    "**/*_test.sql",        # 排除测试 SQL
+    "**/migrations/**",     # 排除数据库迁移脚本
+]
+```
+
+不同 CLI 模式下被排除文件的处理方式：
+
+| 模式 | 被排除文件的处理 |
+|------|-----------------|
+| `--baseline`（默认） | 静默丢弃，不出现在报告中 |
+| `--dir` | 静默丢弃，不出现在报告中 |
+| `--files` | 标记为 ⏭️ Ignored，在报告中列出但不审核 |
+| `--manifest` | 标记为 ⏭️ Ignored，在报告中列出但不审核 |
+
+> `--files` 和 `--manifest` 模式下保留可见性是因为用户显式指定了这些文件，需要告知"你指定了它，但配置排除了它"。
+
+#### 审核结果过滤 `[output.filter]`
+
+在审核完成**之后**、报告输出之前，对 Finding 做保留或筛除。规则照跑、文件照扫，只决定哪些结果出现在最终报告里。
+
+三个维度，彼此是 AND 关系：
+
+| 字段 | 说明 | 通配符 | 合法值示例 |
+|------|------|:---:|---------|
+| `rule_id` | 按规则 ID 过滤 | `*` | `excludes:SCAN-001,TYPE-*` |
+| `severity` | 按严重度过滤 | — | `includes:critical,warning` |
+| `category` | 按诊断分类过滤 | — | `excludes:parse-error` |
+
+每个字段格式为 `{mode}:{value1},{value2},...`：
+
+- `includes` — 白名单：仅保留匹配项
+- `excludes` — 黑名单：排除匹配项
+
+`severity` 取值：`critical` / `warning` / `info`
+
+`category` 取值（kebab-case）：
+
+| 分类 | 说明 | 对应规则前缀 |
+|------|------|-------------|
+| `scan-efficiency` | 扫描效率 | SCAN-* |
+| `join-strategy` | 连接策略 | JOIN-* |
+| `memory-usage` | 内存使用 | MEM-* |
+| `sort-efficiency` | 排序效率 | SORT-* |
+| `type-mismatch` | 类型不匹配 | TYPE-* |
+| `subquery-structure` | 子查询结构 | SUBQ-* / REW-* |
+| `parse-error` | 词法/语法错误 | PARSE-* / VAL-SYNTAX-* |
+| `validation-semantic` | 语义校验 | VAL-PKG-* / VAL-PL-* |
+| `general` | 通用 | GEN-* / ANTI-* / AGG-* |
+
+#### 过滤层次总结
+
+```
+文件发现                     审核管道                     报告输出
+    │                           │                           │
+    ▼                           ▼                           ▼
+[projects.*].exclude  →  规则匹配  →  [output.filter]  →  最终报告
+  排除整个文件              产出 Finding     筛除部分 Finding
 ```
 
 ## 命令行接口
