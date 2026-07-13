@@ -16,10 +16,7 @@ fn parse_filter_expr(expr: &str) -> Option<(&str, Vec<&str>)> {
         "excludes" => "exclude",
         _ => return None,
     };
-    let values: Vec<&str> = values_str.split(',')
-        .map(|s| s.trim())
-        .filter(|s| !s.is_empty())
-        .collect();
+    let values: Vec<&str> = values_str.split(',').map(|s| s.trim()).filter(|s| !s.is_empty()).collect();
     if values.is_empty() {
         return None;
     }
@@ -80,8 +77,12 @@ fn passes_filter(
     if let Some(expr) = rule_id_filter {
         if let Some((mode, values)) = parse_filter_expr(expr) {
             let matched = values.iter().any(|p| wildcard_match(p, &finding.rule_id));
-            if mode == "exclude" && matched { return false; }
-            if mode == "include" && !matched { return false; }
+            if mode == "exclude" && matched {
+                return false;
+            }
+            if mode == "include" && !matched {
+                return false;
+            }
         } else {
             warn_invalid_expr(expr, "rule_id");
         }
@@ -89,8 +90,12 @@ fn passes_filter(
     if let Some(expr) = severity_filter {
         if let Some((mode, values)) = parse_filter_expr(expr) {
             let matched = values.iter().any(|v| *v == finding.severity.as_str());
-            if mode == "exclude" && matched { return false; }
-            if mode == "include" && !matched { return false; }
+            if mode == "exclude" && matched {
+                return false;
+            }
+            if mode == "include" && !matched {
+                return false;
+            }
         } else {
             warn_invalid_expr(expr, "severity");
         }
@@ -99,8 +104,12 @@ fn passes_filter(
         if let Some((mode, values)) = parse_filter_expr(expr) {
             let cat_str = finding.category.as_kebab_str();
             let matched = values.iter().any(|v| *v == cat_str);
-            if mode == "exclude" && matched { return false; }
-            if mode == "include" && !matched { return false; }
+            if mode == "exclude" && matched {
+                return false;
+            }
+            if mode == "include" && !matched {
+                return false;
+            }
         } else {
             warn_invalid_expr(expr, "category");
         }
