@@ -7,10 +7,13 @@
 .roughcollie.toml
 
 testcases/c2j/ogagila/
+testcases/c2j/ogagila-web/
 
 # 本地产物 / 工具会话数据（不应入库）
 .sisyphus/
 testcases/a.csv
+testcases/audit_manifest.csv
+testcases/VERIFICATION.md
 
 # 本地验证配置（每人本机路径不同，各自维护）
 testcases/c2j_ogagila.toml
