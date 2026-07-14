@@ -39,7 +39,7 @@ jobs:
           ZIG_LOCAL_CACHE_DIR: ${{ runner.temp }}/zig-cache
         run: |
           echo 'int main(void) { return 0; }' > /tmp/zigwarm.c
-          zig cc --target=x86_64-unknown-linux-gnu -c /tmp/zigwarm.c -o /tmp/zigwarm.o
+          zig cc -target x86_64-linux-gnu -c /tmp/zigwarm.c -o /tmp/zigwarm.o
       - name: Build embedded astgrep (target)
         env:
           ZIG_LOCAL_CACHE_DIR: ${{ runner.temp }}/zig-cache
@@ -83,7 +83,7 @@ jobs:
           ZIG_LOCAL_CACHE_DIR: ${{ runner.temp }}/zig-cache
         run: |
           echo 'int main(void) { return 0; }' > /tmp/zigwarm.c
-          zig cc --target=aarch64-unknown-linux-gnu -c /tmp/zigwarm.c -o /tmp/zigwarm.o
+          zig cc -target aarch64-linux-gnu -c /tmp/zigwarm.c -o /tmp/zigwarm.o
       - name: Build embedded astgrep (target)
         env:
           ZIG_LOCAL_CACHE_DIR: ${{ runner.temp }}/zig-cache
