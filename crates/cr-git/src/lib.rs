@@ -177,11 +177,14 @@ pub fn changed_files(baseline: &str, repo_path: &Path) -> Result<Vec<ChangedFile
 
 /// 获取指定文件相对于 baseline 的 diff 内容。
 ///
+/// `file_path` 应为相对 `repo_path` 的路径（与 `git diff --name-status` 输出一致）。
+/// 命令在 `repo_path` 下执行，避免 CWD 与 `git_repo` 不一致时找不到文件。
+///
 /// # Errors
 ///
 /// 当 git 命令执行失败时返回错误。
-pub fn file_diff(baseline: &str, file_path: &str) -> Result<String, std::io::Error> {
-    let output = Command::new("git").args(["diff", baseline, "--", file_path]).output()?;
+pub fn file_diff(baseline: &str, file_path: &str, repo_path: &Path) -> Result<String, std::io::Error> {
+    let output = Command::new("git").args(["diff", baseline, "--", file_path]).current_dir(repo_path).output()?;
 
     if !output.status.success() {
         return Err(std::io::Error::other(format!("git diff failed: {}", String::from_utf8_lossy(&output.stderr))));

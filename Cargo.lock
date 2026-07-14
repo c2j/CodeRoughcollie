@@ -831,6 +831,7 @@ dependencies = [
  "gaussdb",
  "globset",
  "indicatif",
+ "ogsql-parser",
  "serde_json",
  "tokio",
  "toml",
