@@ -32,14 +32,8 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: mlugg/setup-zig@v1
         with:
-          version: "0.14.0" # fixes zig cc cache race in 0.13.0
-      - run: cargo install cargo-zigbuild --version 0.19.2
-      - name: Pre-warm zig cc cache
-        env:
-          ZIG_LOCAL_CACHE_DIR: ${{ runner.temp }}/zig-cache
-        run: |
-          echo 'int main(void) { return 0; }' > /tmp/zigwarm.c
-          zig cc -target x86_64-linux-gnu -c /tmp/zigwarm.c -o /tmp/zigwarm.o
+          version: "0.16.0"
+      - run: cargo install cargo-zigbuild --version 0.23.0
       - name: Build embedded astgrep (target)
         env:
           ZIG_LOCAL_CACHE_DIR: ${{ runner.temp }}/zig-cache
@@ -76,14 +70,8 @@ jobs:
           targets: aarch64-unknown-linux-gnu
       - uses: mlugg/setup-zig@v1
         with:
-          version: "0.14.0" # fixes zig cc cache race in 0.13.0
-      - run: cargo install cargo-zigbuild --version 0.19.2
-      - name: Pre-warm zig cc cache
-        env:
-          ZIG_LOCAL_CACHE_DIR: ${{ runner.temp }}/zig-cache
-        run: |
-          echo 'int main(void) { return 0; }' > /tmp/zigwarm.c
-          zig cc -target aarch64-linux-gnu -c /tmp/zigwarm.c -o /tmp/zigwarm.o
+          version: "0.16.0"
+      - run: cargo install cargo-zigbuild --version 0.23.0
       - name: Build embedded astgrep (target)
         env:
           ZIG_LOCAL_CACHE_DIR: ${{ runner.temp }}/zig-cache
