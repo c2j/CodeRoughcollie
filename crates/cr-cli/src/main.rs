@@ -360,8 +360,11 @@ fn discover_audit_files(
                 tracing::warn!(baseline = %baseline, "相对于 baseline 未发现变更文件");
             }
             let total = f.len();
-            let filtered: Vec<PathBuf> =
-                f.into_iter().filter(|cf| file_matches_project_type(cf, project_type)).map(|cf| cf.path).collect();
+            let filtered: Vec<PathBuf> = f
+                .into_iter()
+                .filter(|cf| file_matches_project_type(cf, project_type))
+                .map(|cf| resolve_repo_relative_path(cf.path, repo_path))
+                .collect();
             let type_skipped = total - filtered.len();
 
             let (filtered, exclude_skipped) = apply_exclude_filter(filtered, exclude_patterns, repo_path);
@@ -809,7 +812,7 @@ fn run_all_projects(
 fn apply_diff_aware_filter(
     findings: Vec<cr_core::Finding>,
     baseline: Option<&str>,
-    _repo_path: &Path,
+    repo_path: &Path,
 ) -> Vec<cr_core::Finding> {
     use cr_audit_static::diff_aware::{filter_findings_to_diff, parse_hunks};
 
@@ -821,7 +824,9 @@ fn apply_diff_aware_filter(
     let mut file_hunks: std::collections::HashMap<String, Vec<_>> = std::collections::HashMap::new();
     let unique_files: std::collections::HashSet<&String> = findings.iter().map(|f| &f.file_path).collect();
     for file in unique_files {
-        match cr_git::file_diff(baseline, file) {
+        let rel = Path::new(file).strip_prefix(repo_path).unwrap_or(Path::new(file));
+        let rel_str = rel.to_string_lossy();
+        match cr_git::file_diff(baseline, &rel_str, repo_path) {
             Ok(diff_text) => {
                 let hunks = parse_hunks(&diff_text);
                 if hunks.is_empty() {
@@ -841,6 +846,15 @@ fn apply_diff_aware_filter(
     let dropped = before - filtered.len();
     tracing::info!(before, after = filtered.len(), dropped, "diff-aware 行级过滤完成");
     filtered
+}
+
+#[must_use]
+fn resolve_repo_relative_path(path: PathBuf, repo_path: &Path) -> PathBuf {
+    if path.is_absolute() {
+        path
+    } else {
+        repo_path.join(path)
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1019,26 +1033,62 @@ async fn audit_sql_file(
     ));
 
     if let Some(conn) = db_conn {
-        if !is_explainable_dml(sql) {
-            tracing::debug!("跳过 EXPLAIN（非 DML 语句：CREATE/ALTER/DROP/SET/TRIGGER/...）");
-        } else {
-            tracing::debug!("EXPLAIN 审核中");
-            let timeout = db_config.map(|d| d.explain.timeout_seconds).unwrap_or(30);
-            match cr_db::execute_explain(conn.client(), sql, timeout).await {
-                Ok(explain_text) => match cr_audit_explain::analyze_explain_text(&explain_text, file_path) {
-                    Ok(explain_findings) => findings.extend(explain_findings),
-                    Err(e) => {
-                        tracing::warn!(error = %e, "EXPLAIN 解析失败，跳过执行计划审核");
-                    }
-                },
-                Err(e) => {
-                    tracing::warn!(error = %e, "EXPLAIN 执行失败，该 SQL 仅静态审核");
-                }
-            }
-        }
+        let timeout = db_config.map(|d| d.explain.timeout_seconds).unwrap_or(30);
+        findings.extend(explain_sql_statements(conn, sql, file_path, timeout).await);
     }
 
     findings
+}
+
+async fn explain_sql_statements(
+    conn: &cr_db::GaussDbConnection,
+    sql: &str,
+    file_path: &str,
+    timeout: u64,
+) -> Vec<cr_core::Finding> {
+    let mut findings = Vec::new();
+    let statements = explainable_statement_texts(sql);
+    if statements.is_empty() {
+        tracing::debug!("跳过 EXPLAIN（无可 EXPLAIN 的 DML 语句）");
+        return findings;
+    }
+
+    tracing::debug!(count = statements.len(), "EXPLAIN 审核中（按语句）");
+    for (idx, stmt_sql) in statements.iter().enumerate() {
+        match cr_db::execute_explain(conn.client(), stmt_sql, timeout).await {
+            Ok(explain_text) => match cr_audit_explain::analyze_explain_text(&explain_text, file_path) {
+                Ok(explain_findings) => findings.extend(explain_findings),
+                Err(e) => {
+                    tracing::warn!(
+                        error = %e,
+                        stmt = idx + 1,
+                        "EXPLAIN 解析失败，跳过该语句"
+                    );
+                }
+            },
+            Err(e) => {
+                tracing::warn!(
+                    error = %e,
+                    stmt = idx + 1,
+                    "EXPLAIN 执行失败，跳过该语句"
+                );
+            }
+        }
+    }
+    findings
+}
+
+#[must_use]
+fn explainable_statement_texts(sql: &str) -> Vec<String> {
+    let (stmt_infos, _errors) = ogsql_parser::Parser::parse_sql(sql);
+    if !stmt_infos.is_empty() {
+        return stmt_infos.into_iter().map(|si| si.sql_text).filter(|t| is_explainable_dml(t)).collect();
+    }
+    if is_explainable_dml(sql) {
+        vec![sql.to_string()]
+    } else {
+        Vec::new()
+    }
 }
 
 fn is_explainable_dml(sql: &str) -> bool {
@@ -1090,6 +1140,36 @@ mod tests {
             "[projects.test]\ngit_repo = \".\"\n[projects.test.codeweb]\nproject_path = \"{project_path}\"\nenabled = {enabled}\n"
         );
         toml::from_str::<cr_config::Config>(&s).unwrap().projects.get("test").unwrap().codeweb.clone().unwrap()
+    }
+
+    #[test]
+    fn resolve_repo_relative_joins_relative_paths() {
+        let repo = Path::new("c2j/ogagila");
+        let joined = resolve_repo_relative_path(PathBuf::from("sqls/a.sql"), repo);
+        assert_eq!(joined, PathBuf::from("c2j/ogagila/sqls/a.sql"));
+    }
+
+    #[test]
+    fn resolve_repo_relative_keeps_absolute_paths() {
+        let abs = PathBuf::from("/tmp/repo/sqls/a.sql");
+        let out = resolve_repo_relative_path(abs.clone(), Path::new("c2j/ogagila"));
+        assert_eq!(out, abs);
+    }
+
+    #[test]
+    fn explainable_statement_texts_splits_multi_select() {
+        let sql = "SELECT 1 FROM t;\nSELECT * FROM rental LIMIT 1;\nCREATE TABLE x (id int);\n";
+        let stmts = explainable_statement_texts(sql);
+        assert!(stmts.len() >= 2, "expected >=2 DML statements, got {stmts:?}");
+        assert!(stmts.iter().all(|s| is_explainable_dml(s)));
+        assert!(stmts.iter().any(|s| s.to_uppercase().contains("RENTAL")));
+    }
+
+    #[test]
+    fn explainable_statement_texts_skips_ddl_only() {
+        let sql = "CREATE TABLE t (id int);\nSET search_path TO public;\n";
+        let stmts = explainable_statement_texts(sql);
+        assert!(stmts.is_empty(), "DDL/SET only should yield no explainable stmts: {stmts:?}");
     }
 
     #[test]

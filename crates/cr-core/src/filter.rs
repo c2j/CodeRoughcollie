@@ -103,7 +103,7 @@ fn passes_filter(
     if let Some(expr) = category_filter {
         if let Some((mode, values)) = parse_filter_expr(expr) {
             let cat_str = finding.category.as_kebab_str();
-            let matched = values.iter().any(|v| *v == cat_str);
+            let matched = values.contains(&cat_str);
             if mode == "exclude" && matched {
                 return false;
             }

@@ -21,6 +21,7 @@ cr-config = { workspace = true }
 cr-db = { workspace = true }
 cr-git = { workspace = true }
 gaussdb = { workspace = true }
+ogsql-parser = { workspace = true }
 clap = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
