@@ -24,10 +24,10 @@ CodeRoughcollie 仓库的 AI Agent 与人类协作约定。
 - 把探索草稿、临时脚本、调试 `dbg!`/`println!` 留在主代码
 
 **Ask first**
-- 改人类已有测试（含断言、fixture、snapshot）
+- 改人类已有测试（含断言、fixture、golden 期望值）
 - 新增运行时依赖、`unsafe`、新的 workspace crate、新的外部服务
 - 为不可测代码做超出当前改动路径的重构
-- 接受/更新 snapshot（insta / golden file）且行为含义发生变化
+- 接受/更新 golden file 或固定 fixture 的期望值，且行为含义发生变化（本仓库自有 `crates/` 未引入 `insta`；`lib/*/` 子模块里的 `insta` 快照属于上游，见「子模块策略」）
 - 关闭 clippy lint、新增 `#[allow]`
 
 **Always**
@@ -57,7 +57,7 @@ CodeRoughcollie 仓库的 AI Agent 与人类协作约定。
 
 ### 遗留代码与接缝
 
-**特征测试** — 锁定现有行为，不是证明它正确。用固定 fixture 或 `insta` snapshot。更新 snapshot 必须在汇报里写清 diff 含义；默认不接受「看起来差不多」。
+**特征测试** — 锁定现有行为，不是证明它正确。本仓库自有 `crates/` **未引入 `insta`**，用固定 fixture + 显式断言，或与 golden 文件逐字比对。更新期望值必须在汇报里写清 diff 含义；默认不接受「看起来差不多」。
 
 **接缝（优先顺序，靠后的更差）**
 1. trait + 泛型或 `impl Trait`，测试用假类型
@@ -76,7 +76,7 @@ CodeRoughcollie 仓库的 AI Agent 与人类协作约定。
 | 文档测试 | `///` 示例 | 公共 API 必须可运行；禁止滥用 `no_run` |
 | CLI/二进制 | 项目惯用方式 | 退出码与 stdout 契约 |
 | 不变量 | `proptest`（项目已用时） | 往返解析、幂等、单调性 |
-| 特征/快照 | `insta` 或固定 fixture | 遗留输出；接受 snapshot 必须说明 |
+| 特征/golden | 固定 fixture（本仓库未引入 `insta`） | 遗留输出；更新期望值必须说明 |
 
 不要把本该测公共契约的内容塞进 `#[cfg(test)]` 去读私有字段。
 
@@ -87,7 +87,7 @@ Rust 的 Red 允许是：测试引用了尚不存在的类型/函数导致编译
 - 无必要 `unsafe`；有则必须 `SAFETY` 注释
 - 一次性 `cargo update` 整个 lockfile
 - 用 `#[allow(...)]` 静默应修复的 lint
-- 为绿而改 snapshot 却不解释行为是否应该变
+- 为绿而改 golden/期望值却不解释行为是否应该变
 
 ### 命令
 
@@ -96,14 +96,20 @@ Rust 的 Red 允许是：测试引用了尚不存在的类型/函数导致编译
 cargo test -p <crate> <test_name>
 
 # 提交前门禁（CI 门禁，顺序：fmt → clippy → test）
-cargo fmt --all -- --check
-cargo clippy --workspace -- -D warnings
-cargo test --workspace
+# OUR_CRATES 与 .github/workflows/ci.yml 的同名变量一致——只覆盖本仓库自有 crate
+OUR_CRATES='-p cr-core -p cr-db -p cr-git -p cr-config -p cr-report -p cr-audit-static -p cr-audit-explain -p cr-audit-complexity -p cr-audit-impact -p cr-plugin -p cr-mcp-server -p cr-cli -p cr-server'
+cargo fmt $OUR_CRATES -- --check
+cargo clippy $OUR_CRATES -- -D warnings
+cargo test $OUR_CRATES
 ```
 
-> **CRITICAL**: TDD 在子模块目录内不适用——`lib/<name>/` 的改动必须走上游仓库（见「子模块策略」）。本文件的 TDD 工作流仅针对本仓库自有 crate（crates/）。子模块内禁止跑 `cargo fmt --all`（会污染子模块工作树），只用 `cargo fmt -p <crate>` 或 `cargo fmt --all -- --check`。
+> **CRITICAL**: TDD 在子模块目录内不适用——`lib/<name>/` 的改动必须走上游仓库（见「子模块策略」）。本文件的 TDD 工作流仅针对本仓库自有 crate（`crates/`）。
+>
+> **不要用 `--workspace`。** 子模块里的 crate 是 path 依赖，已被 cargo 拉进本 workspace：`cargo metadata` 目前解析出 25 个 package（`gaussdb`、`tokio-opengauss`、`ogexplain-core`、`ogsql-complexity`、`metamorphosis-core`、`metamorphosis-rules` 等都在内，只有 `lib/codeweb` 被 `exclude`）。`cargo clippy/test/fmt --workspace` 会把门禁打到上游代码上，与本节的子模块策略直接冲突，还会在子模块工作树留下产物。一律用上面的 `$OUR_CRATES` 显式枚举。
 
-循环内只跑受影响 crate；提交前再 workspace。
+循环内只跑受影响 crate（`cargo test -p <crate>`）；提交前跑上面的 `$OUR_CRATES` 全量门禁。
+
+> 注意：CI 的 `cargo clippy $OUR_CRATES` 没有 `-D warnings`，`cargo audit` 是 `|| true`（不阻塞）。本文件要求比 CI 严——warning 与 audit 结论都要处理，不要因为「CI 绿」就放过。
 
 ### 完成标准与汇报
 
@@ -124,7 +130,7 @@ cargo test --workspace
 ### 质量判断（自我检查）
 - 这条测试在实现写错时会失败吗？
 - 我是否在测行为，而不是私有实现细节？
-- 我是否用 skip、更宽断言、unwrap、snapshot 盲收换绿？
+- 我是否用 skip、更宽断言、unwrap、golden 盲收换绿？
 - 命令是否来自本文件，而不是我编的？
 
 ---
